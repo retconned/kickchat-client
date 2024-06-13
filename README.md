@@ -8,6 +8,8 @@ This client is designed to simplify the process of building chat bots and other 
 
 If you're looking to start building a chat bot or other chat-based applications, the KickChat Client is a great place to start. Its lightweight and has a basic handler logic makes it a good choice as a starter.
 
+## 🟥 This is an experimental authentication branch, Still in development.
+
 # Installation
 
 1. Clone the repo
@@ -35,6 +37,11 @@ If you're looking to start building a chat bot or other chat-based applications,
    ```
 
    - send a message using the website and grab necessary headers from the request in the network tab of your browser to match the axios request in codebase `../src/actions/sendMessage.ts` and fill your `.env` file with the values.
+
+   ## 🟥 Authentication instructions
+
+   - `USERNAME` & `PASSWORD` - Are your Kick username & password.
+   - to get the OTP_SECRET, you need to login to your account and go https://kick.com/dashboard/settings/security and redo your 2FA setup. copy the code under the QR code and and fill your `.env` file with the value .
 
 5. Run the app locally
 
