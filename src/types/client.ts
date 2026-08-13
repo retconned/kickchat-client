@@ -27,6 +27,7 @@ export interface Video {
 
 export interface KickClient {
   destroy: () => void;
+  // biome-ignore lint/suspicious/noExplicitAny: event listeners accept arbitrary payloads.
   on: (event: string, listener: (...args: any[]) => void) => void;
   vod: (video_id: string) => Promise<Video>;
   login: (credentials: LoginOptions) => Promise<boolean>;

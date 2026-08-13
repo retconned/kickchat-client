@@ -222,6 +222,7 @@ export const createClient = (
     });
   }
 
+  // biome-ignore lint/suspicious/noExplicitAny: event listeners accept arbitrary payloads.
   const on = (event: string, listener: (...args: any[]) => void) => {
     emitter.on(event, listener);
   };
@@ -336,6 +337,7 @@ export const createClient = (
         `Failed to send message: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
   };
@@ -397,6 +399,7 @@ export const createClient = (
         `Failed to ${permanent ? "ban" : "time out"} user ${targetUser}: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
   };
@@ -433,6 +436,7 @@ export const createClient = (
         `Failed to unban user ${targetUser}: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
   };
@@ -469,6 +473,7 @@ export const createClient = (
         `Failed to delete message ${messageId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
   };
@@ -521,6 +526,7 @@ export const createClient = (
         `Failed to ${mode === "off" ? "disable" : "enable"} slow mode: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
   };

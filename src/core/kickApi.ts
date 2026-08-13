@@ -128,8 +128,6 @@ export const authentication = async ({
     throw error;
   }
 
-  const requestData: any[] = [];
-
   // Monitor all requests
   page.on("request", (request) => {
     const url = request.url();
@@ -146,13 +144,6 @@ export const authentication = async ({
         }
       }
     }
-
-    requestData.push({
-      url,
-      headers,
-      method: request.method(),
-      resourceType: request.resourceType(),
-    });
 
     request.continue();
   });

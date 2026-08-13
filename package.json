@@ -34,21 +34,16 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsup",
-    "format:fix": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
-    "lint:ts": "tsc",
-    "lint:check": "eslint \"src/**/*.{ts,js}\"",
-    "lint:fix": "eslint --fix \"src/**/*.{ts,js}\"",
+    "format": "biome format --write .",
+    "check": "biome check",
+    "fix": "biome check --write .",
+    "typecheck": "tsc",
     "check-exports": "attw --pack . --ignore-rules=cjs-resolves-to-esm",
-
     "dev": "vitest",
-
-    "checks": "npm run format:fix && npm run lint:ts && npm run check-exports && npm run build",
-
+    "checks": "npm run typecheck && npm run check && npm run check-exports && npm run build",
     "release:version": "changeset version",
     "release:publish": "changeset publish",
     "release:local": "npm run release:version && npm run release:publish",
-
     "prepublishOnly": "npm run checks"
   },
   "exports": {
@@ -61,13 +56,9 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.15.4",
+    "@biomejs/biome": "^2.5.8",
     "@changesets/cli": "^2.27.8",
     "@types/ws": "^8.5.12",
-    "@typescript-eslint/eslint-plugin": "^8.4.0",
-    "@typescript-eslint/parser": "^8.4.0",
-    "eslint": "8",
-    "eslint-config-prettier": "^9.1.0",
-    "prettier": "^3.3.3",
     "tsup": "^8.2.4",
     "tsx": "^4.19.1",
     "typescript": "^5.5.4",
