@@ -1,4 +1,4 @@
-# @retconned/kickjs
+# @retconned/kick-js
 
 ## 0.5.4
 

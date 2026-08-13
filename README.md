@@ -74,6 +74,17 @@ const polls = await client.getPolls();
 // example: const polls = await client.getPolls("xqc");
 ```
 
+## Releasing :rocket:
+
+Releases are handled automatically with [Changesets](https://github.com/changesets/changesets).
+
+1.  Make your changes and run `pnpm changeset` to describe the change and its version bump (patch/minor/major). Commit the generated changeset file along with your code.
+2.  Merge to `main`. The Release workflow validates the code (`pnpm checks`) and opens a **Release** pull request.
+3.  Merge the Release PR. The workflow publishes the package to npm and tags the commit.
+
+To release from your local machine instead, run `pnpm release:local` (runs checks, then versions and publishes).
+
+
 ## Disclaimer :warning:
 
 @retconned/kick-js is not affiliated with or endorsed by [Kick.com](https://kick.com). It is an independent tool created to facilitate making moderation bots & other chat-related applications.

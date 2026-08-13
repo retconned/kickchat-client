@@ -33,13 +33,13 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Run project checks
-              run: pnpm run checks
+              run: pnpm checks
 
             - name: Create Release PR or Publish
               uses: changesets/action@v1
               with:
-                  version: pnpm run release:version
-                  publish: pnpm run release:publish
+                  version: pnpm release:version
+                  publish: pnpm release:publish
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

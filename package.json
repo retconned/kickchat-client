@@ -35,23 +35,28 @@
   "scripts": {
     "build": "tsup",
     "format": "biome format --write .",
-    "check": "biome check",
+    "lint": "biome check",
     "fix": "biome check --write .",
     "typecheck": "tsc",
-    "check-exports": "attw --pack . --ignore-rules=cjs-resolves-to-esm",
+    "check-exports": "attw --pack .",
     "dev": "vitest",
-    "checks": "npm run typecheck && npm run check && npm run check-exports && npm run build",
+    "checks": "pnpm typecheck && pnpm lint && pnpm build && pnpm check-exports",
+    "changeset": "changeset",
     "release:version": "changeset version",
     "release:publish": "changeset publish",
-    "release:local": "npm run release:version && npm run release:publish",
-    "prepublishOnly": "npm run checks"
+    "release:local": "pnpm checks && pnpm release:version && pnpm release:publish"
   },
   "exports": {
     "./package.json": "./package.json",
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "devDependencies": {
