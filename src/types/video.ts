@@ -5,24 +5,24 @@ export type VideoInfo = {
   thumb: null;
   s3: null;
   trading_platform_id: null;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
   uuid: string;
   views: number;
   deleted_at: null;
   source: string;
-  livestream: Livestream;
+  livestream: Livestream | null;
 };
 
 export type Livestream = {
   id: number;
   slug: string;
   channel_id: number;
-  created_at: Date;
+  created_at: string;
   session_title: string;
   is_live: boolean;
   risk_level_id: null;
-  start_time: Date;
+  start_time: string;
   source: null;
   twitch_channel: null;
   duration: number;
@@ -83,6 +83,6 @@ export type User = {
 export type Verified = {
   id: number;
   channel_id: number;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
 };

@@ -84,7 +84,7 @@ export interface UserBannedEvent {
     slug: string;
   };
 
-  expires_at?: Date;
+  expires_at?: string;
 }
 
 export interface UserUnbannedEvent {
@@ -107,7 +107,7 @@ export interface PinnedMessageCreatedEvent {
     chatroom_id: number;
     content: string;
     type: string;
-    created_at: Date;
+    created_at: string;
     sender: {
       id: number;
       username: string;
@@ -123,5 +123,5 @@ export interface PinnedMessageCreatedEvent {
     };
     metadata: null;
   };
-  duration: string;
+  duration: number;
 }

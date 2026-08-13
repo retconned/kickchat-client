@@ -1,4 +1,4 @@
-import type { Channel, Livestream } from "./video";
+import { type Channel, type Livestream } from "./video";
 
 export type EventHandler<T> = (data: T) => void;
 
@@ -14,9 +14,9 @@ export interface Video {
   thumbnail: string;
   duration: number;
   live_stream_id: number;
-  start_time: Date;
-  created_at: Date;
-  updated_at: Date;
+  start_time: string;
+  created_at: string;
+  updated_at: string;
   uuid: string;
   views: number;
   stream: string;
@@ -26,6 +26,7 @@ export interface Video {
 }
 
 export interface KickClient {
+  destroy: () => void;
   on: (event: string, listener: (...args: any[]) => void) => void;
   vod: (video_id: string) => Promise<Video>;
   login: (credentials: LoginOptions) => Promise<boolean>;
@@ -50,13 +51,13 @@ export interface KickClient {
 export interface AuthenticationSettings {
   username: string;
   password: string;
-  otp_secret: string;
+  otp_secret?: string;
 }
 
 type LoginCredentials = {
   username: string;
   password: string;
-  otp_secret: string;
+  otp_secret?: string;
 };
 
 type TokenCredentials = {
@@ -78,7 +79,7 @@ export type Poll = {
     title: string;
     duration: number;
     result_display_duration: number;
-    created_at: Date;
+    created_at: string;
     options: {
       id: number;
       label: string;
@@ -86,7 +87,7 @@ export type Poll = {
     }[];
     remaining: number;
     has_voted: boolean;
-    voted_option_id: null;
+    voted_option_id: number | null;
   };
 };
 

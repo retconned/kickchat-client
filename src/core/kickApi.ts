@@ -1,27 +1,35 @@
+import { authenticator } from "otplib";
 import puppeteer from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import type { KickChannelInfo } from "../types/channels";
-import type { VideoInfo } from "../types/video";
-import { authenticator } from "otplib";
-import type { AuthenticationSettings } from "../types/client";
+import { type KickChannelInfo } from "../types/channels";
+import { type AuthenticationSettings } from "../types/client";
+import { type VideoInfo } from "../types/video";
+
+puppeteer.use(StealthPlugin());
 
 const setupPuppeteer = async () => {
-  const puppeteerExtra = puppeteer.use(StealthPlugin());
-  const browser = await puppeteerExtra.launch({
+  const browser = await puppeteer.launch({
     headless: true,
     defaultViewport: null,
-    args: ["--start-maximized"],
   });
-  const page = await browser.newPage();
-  return { browser, page };
+  try {
+    const page = await browser.newPage();
+    return { browser, page };
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
 };
 
 export const getChannelData = async (
   channel: string,
 ): Promise<KickChannelInfo | null> => {
-  const { browser, page } = await setupPuppeteer();
+  let browser: { close: () => Promise<void> } | null = null;
 
   try {
+    const { browser: setupBrowser, page } = await setupPuppeteer();
+    browser = setupBrowser;
+
     const response = await page.goto(
       `https://kick.com/api/v2/channels/${channel}`,
     );
@@ -36,7 +44,7 @@ export const getChannelData = async (
 
     const jsonContent: KickChannelInfo = await page.evaluate(() => {
       const bodyElement = document.querySelector("body");
-      if (!bodyElement || !bodyElement.textContent) {
+      if (!bodyElement?.textContent) {
         throw new Error("Unable to fetch channel data");
       }
       return JSON.parse(bodyElement.textContent);
@@ -47,16 +55,19 @@ export const getChannelData = async (
     console.error("Error getting channel data:", error);
     return null;
   } finally {
-    await browser.close();
+    await browser?.close();
   }
 };
 
 export const getVideoData = async (
   video_id: string,
 ): Promise<VideoInfo | null> => {
-  const { browser, page } = await setupPuppeteer();
+  let browser: { close: () => Promise<void> } | null = null;
 
   try {
+    const { browser: setupBrowser, page } = await setupPuppeteer();
+    browser = setupBrowser;
+
     const response = await page.goto(
       `https://kick.com/api/v1/video/${video_id}`,
     );
@@ -71,7 +82,7 @@ export const getVideoData = async (
 
     const jsonContent: VideoInfo = await page.evaluate(() => {
       const bodyElement = document.querySelector("body");
-      if (!bodyElement || !bodyElement.textContent) {
+      if (!bodyElement?.textContent) {
         throw new Error("Unable to fetch video data");
       }
       return JSON.parse(bodyElement.textContent);
@@ -82,7 +93,7 @@ export const getVideoData = async (
     console.error("Error getting video data:", error);
     return null;
   } finally {
-    await browser.close();
+    await browser?.close();
   }
 };
 
@@ -101,17 +112,23 @@ export const authentication = async ({
   let cookieString = "";
   let isAuthenticated = false;
 
-  const puppeteerExtra = puppeteer.use(StealthPlugin());
-  const browser = await puppeteerExtra.launch({
+  const browser = await puppeteer.launch({
     headless: true,
     defaultViewport: null,
   });
 
-  const page = await browser.newPage();
-  const requestData: any[] = [];
+  let page: Awaited<ReturnType<typeof browser.newPage>>;
 
-  // Enable request interception
-  await page.setRequestInterception(true);
+  try {
+    page = await browser.newPage();
+    // Enable request interception
+    await page.setRequestInterception(true);
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
+
+  const requestData: any[] = [];
 
   // Monitor all requests
   page.on("request", (request) => {
@@ -119,8 +136,8 @@ export const authentication = async ({
     const headers = request.headers();
 
     if (url.includes("/api/v2/channels/followed")) {
-      const reqBearerToken = headers["authorization"] || "";
-      cookieString = headers["cookie"] || "";
+      const reqBearerToken = headers.authorization || "";
+      cookieString = headers.cookie || "";
 
       if (!bearerToken && reqBearerToken.includes("Bearer ")) {
         const splitToken = reqBearerToken.split("Bearer ")[1];
@@ -158,6 +175,8 @@ export const authentication = async ({
     await page.type('input[name="password"]', password, { delay: 100 });
     await page.click('button[data-test="login-submit"]');
 
+    let requires2FA = false;
+
     try {
       await page.waitForFunction(
         () => {
@@ -170,27 +189,37 @@ export const authentication = async ({
         },
         { timeout: selectorTimeout },
       );
-
-      const requires2FA = await page.evaluate(() => {
-        return !!document.querySelector('input[data-input-otp="true"]');
-      });
-
-      if (requires2FA) {
-        if (!otp_secret) {
-          throw new Error("2FA authentication required");
-        }
-
-        const token = authenticator.generate(otp_secret);
-        await page.waitForSelector('input[data-input-otp="true"]');
-        await page.type('input[data-input-otp="true"]', token, { delay: 100 });
-        await page.click('button[type="submit"]');
-        await page.waitForNavigation({ waitUntil: "networkidle0" });
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "TimeoutError")) {
+        throw error;
       }
-    } catch (error: any) {
-      if (error.message.includes("2FA authentication required")) throw error;
     }
 
-    await page.goto("https://kick.com/api/v2/channels/followed");
+    requires2FA = await page.evaluate(() => {
+      return !!document.querySelector('input[data-input-otp="true"]');
+    });
+
+    if (requires2FA) {
+      if (!otp_secret) {
+        throw new Error("2FA authentication required");
+      }
+
+      const token = authenticator.generate(otp_secret);
+      await page.waitForSelector('input[data-input-otp="true"]');
+      await page.type('input[data-input-otp="true"]', token, { delay: 100 });
+      await page.click('button[type="submit"]');
+      await page.waitForNavigation({ waitUntil: "networkidle0" });
+    }
+
+    const followedResponse = await page.goto(
+      "https://kick.com/api/v2/channels/followed",
+    );
+
+    if (followedResponse?.status() !== 200) {
+      throw new Error(
+        `Failed to verify authentication, received status ${followedResponse?.status() ?? "unknown"}`,
+      );
+    }
 
     const cookies = await page.cookies();
     cookieString = cookies
@@ -222,8 +251,6 @@ export const authentication = async ({
       cookies: cookieString,
       isAuthenticated,
     };
-  } catch (error: any) {
-    throw error;
   } finally {
     await browser.close();
   }

@@ -1,30 +1,29 @@
-import type WebSocket from "ws";
-import EventEmitter from "events";
+import EventEmitter from "node:events";
 import { authentication, getChannelData, getVideoData } from "../core/kickApi";
-import { createWebSocket } from "../core/websocket";
 import { parseMessage } from "../core/messageHandling";
-import type { KickChannelInfo } from "../types/channels";
-import type { VideoInfo } from "../types/video";
-import type {
-  KickClient,
-  ClientOptions,
-  Poll,
-  Leaderboard,
-  LoginOptions,
-} from "../types/client";
-import type { MessageData } from "../types/events";
-import { validateCredentials } from "../utils/utils";
-
 import { createHeaders, makeRequest } from "../core/requestHelper";
+import { createReconnectingWebSocket } from "../core/websocket";
+import { type KickChannelInfo } from "../types/channels";
+import {
+  type ClientOptions,
+  type KickClient,
+  type Leaderboard,
+  type LoginOptions,
+  type Poll,
+} from "../types/client";
+import { type MessageData } from "../types/events";
+import { type VideoInfo } from "../types/video";
+import { decodeXsrfToken, validateCredentials } from "../utils/utils";
 
 export const createClient = (
   channelName: string,
   options: ClientOptions = {},
 ): KickClient => {
   const emitter = new EventEmitter();
-  let socket: WebSocket | null = null;
+  emitter.on("error", () => {});
   let channelInfo: KickChannelInfo | null = null;
   let videoInfo: VideoInfo | null = null;
+  let wsHandle: { close: () => void } | null = null;
 
   let clientToken: string | null = null;
   let clientCookies: string | null = null;
@@ -39,25 +38,37 @@ export const createClient = (
 
   const mergedOptions = { ...defaultOptions, ...options };
 
-  const checkAuth = () => {
+  const getHeaders = (channelSlug: string) => {
+    const bearerToken = clientBearerToken;
+    const xsrfToken = clientToken;
+    const cookies = clientCookies;
+
     if (!isLoggedIn) {
       throw new Error("Authentication required. Please login first.");
     }
-    if (!clientBearerToken) {
+    if (!bearerToken) {
       throw new Error("Missing bearer token");
     }
-
-    if (!clientCookies) {
+    if (!xsrfToken) {
+      throw new Error("Missing XSRF token");
+    }
+    if (!cookies) {
       throw new Error("Missing cookies");
     }
+
+    return createHeaders({ bearerToken, xsrfToken, cookies, channelSlug });
   };
 
   const login = async (options: LoginOptions) => {
+    if (mergedOptions.readOnly === true) {
+      throw new Error("Read-only mode does not support authentication");
+    }
+
     const { type, credentials } = options;
 
     try {
       switch (type) {
-        case "login":
+        case "login": {
           if (!credentials) {
             throw new Error("Credentials are required for login");
           }
@@ -93,6 +104,7 @@ export const createClient = (
 
           await initialize();
           break;
+        }
 
         case "tokens":
           if (!credentials) {
@@ -117,7 +129,10 @@ export const createClient = (
 
       return true;
     } catch (error) {
-      console.error("Login failed:", error);
+      console.error(
+        "Login failed:",
+        error instanceof Error ? error.message : error,
+      );
       throw error;
     }
   };
@@ -143,64 +158,68 @@ export const createClient = (
         );
       }
 
-      socket = createWebSocket(channelInfo.chatroom.id);
-
-      socket.on("open", () => {
-        if (mergedOptions.logger) {
-          console.log(`Connected to channel: ${channelName}`);
-        }
-        emitter.emit("ready", getUser());
-      });
-
-      socket.on("message", (data: WebSocket.Data) => {
-        const parsedMessage = parseMessage(data.toString());
-        if (parsedMessage) {
-          switch (parsedMessage.type) {
-            case "ChatMessage":
-              if (mergedOptions.plainEmote) {
-                const messageData = parsedMessage.data as MessageData;
-                messageData.content = messageData.content.replace(
-                  /\[emote:(\d+):(\w+)\]/g,
-                  (_, __, emoteName) => emoteName,
-                );
-              }
-              break;
-            case "Subscription":
-              break;
-            case "GiftedSubscriptions":
-              break;
-            case "StreamHostEvent":
-              break;
-            case "UserBannedEvent":
-              break;
-            case "UserUnbannedEvent":
-              break;
-            case "PinnedMessageCreatedEvent":
-              break;
+      wsHandle = createReconnectingWebSocket(channelInfo.chatroom.id, {
+        onOpen: () => {
+          if (mergedOptions.logger) {
+            console.log(`Connected to channel: ${channelName}`);
           }
-          emitter.emit(parsedMessage.type, parsedMessage.data);
-        }
-      });
-
-      socket.on("close", () => {
-        if (mergedOptions.logger) {
-          console.log(`Disconnected from channel: ${channelName}`);
-        }
-        emitter.emit("disconnect");
-      });
-
-      socket.on("error", (error) => {
-        console.error("WebSocket error:", error);
-        emitter.emit("error", error);
+          emitter.emit("ready", getUser());
+        },
+        onMessage: (data) => {
+          const parsedMessage = parseMessage(data.toString());
+          if (parsedMessage) {
+            switch (parsedMessage.type) {
+              case "ChatMessage":
+                if (mergedOptions.plainEmote) {
+                  const messageData = parsedMessage.data as MessageData;
+                  messageData.content = messageData.content.replace(
+                    /\[emote:(\d+):(\w+)\]/g,
+                    (_, __, emoteName) => emoteName,
+                  );
+                }
+                break;
+              case "Subscription":
+              case "GiftedSubscriptions":
+              case "StreamHost":
+              case "MessageDeleted":
+              case "UserBanned":
+              case "UserUnbanned":
+              case "PinnedMessageCreated":
+              case "PinnedMessageDeleted":
+              case "PollUpdate":
+              case "PollDelete":
+                break;
+            }
+            emitter.emit(parsedMessage.type, parsedMessage.data);
+          }
+        },
+        onClose: () => {
+          if (mergedOptions.logger) {
+            console.log(`Disconnected from channel: ${channelName}`);
+          }
+          emitter.emit("disconnect");
+        },
+        onError: (error) => {
+          console.error(
+            "WebSocket error:",
+            error instanceof Error ? error.message : error,
+          );
+          emitter.emit("error", error);
+        },
       });
     } catch (error) {
-      console.error("Error during initialization:", error);
+      console.error(
+        "Error during initialization:",
+        error instanceof Error ? error.message : error,
+      );
       throw error;
     }
   };
 
   if (mergedOptions.readOnly === true) {
-    void initialize();
+    void initialize().catch((error) => {
+      emitter.emit("error", error);
+    });
   }
 
   const on = (event: string, listener: (...args: any[]) => void) => {
@@ -221,6 +240,10 @@ export const createClient = (
 
     if (!videoInfo) {
       throw new Error("Unable to fetch video data");
+    }
+
+    if (!videoInfo.livestream) {
+      throw new Error("Unable to fetch livestream data");
     }
 
     return {
@@ -246,51 +269,75 @@ export const createClient = (
       throw new Error("Channel info not available");
     }
 
+    if (!isLoggedIn) {
+      throw new Error("Authentication required. Please login first.");
+    }
+
     if (messageContent.length > 500) {
       throw new Error("Message content must be less than 500 characters");
     }
 
-    if (!clientCookies) {
-      throw new Error("Cookies missing");
-    }
-    if (!clientBearerToken) {
+    const bearerToken = clientBearerToken;
+    const xsrfToken = clientToken;
+    const cookies = clientCookies;
+
+    if (!bearerToken) {
       throw new Error("Bearer token missing");
     }
-    if (!clientToken) {
+    if (!xsrfToken) {
       throw new Error("XSRF token missing");
     }
-    // this is a temp thing till i figure out whats the axios issue
+    if (!cookies) {
+      throw new Error("Cookies missing");
+    }
 
-    fetch(`https://kick.com/api/v2/messages/send/${channelInfo.chatroom.id}`, {
-      headers: {
-        accept: "application/json",
-        "accept-language": "en-US,en;q=0.9",
-        authorization: `Bearer ${clientBearerToken}`,
-        "x-CSRF-token": clientToken,
-        "cache-control": "max-age=0",
-        cluster: "v2",
-        "content-type": "application/json",
-        priority: "u=1, i",
-        "sec-ch-ua": '"Not A(Brand";v="8", "Chromium";v="132"',
-        "sec-ch-ua-arch": '"arm"',
-        "sec-ch-ua-bitness": '"64"',
-        "sec-ch-ua-full-version": '"132.0.6834.111"',
-        "sec-ch-ua-full-version-list":
-          '"Not A(Brand";v="8.0.0.0", "Chromium";v="132.0.6834.111"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-model": '""',
-        "sec-ch-ua-platform": '"macOS"',
-        "sec-ch-ua-platform-version": '"15.0.1"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
-        cookie: clientCookies,
-        Referer: `https://kick.com/${channelInfo.slug}`,
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-      },
-      body: `{"content":"${messageContent}","type":"message"}`,
-      method: "POST",
-    });
+    try {
+      const response = await fetch(
+        `https://kick.com/api/v2/messages/send/${channelInfo.chatroom.id}`,
+        {
+          headers: {
+            accept: "application/json",
+            "accept-language": "en-US,en;q=0.9",
+            authorization: `Bearer ${bearerToken}`,
+            "x-xsrf-token": decodeXsrfToken(xsrfToken),
+            "cache-control": "max-age=0",
+            cluster: "v2",
+            "content-type": "application/json",
+            priority: "u=1, i",
+            "sec-ch-ua": '"Not A(Brand";v="8", "Chromium";v="132"',
+            "sec-ch-ua-arch": '"arm"',
+            "sec-ch-ua-bitness": '"64"',
+            "sec-ch-ua-full-version": '"132.0.6834.111"',
+            "sec-ch-ua-full-version-list":
+              '"Not A(Brand";v="8.0.0.0", "Chromium";v="132.0.6834.111"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-model": '""',
+            "sec-ch-ua-platform": '"macOS"',
+            "sec-ch-ua-platform-version": '"15.0.1"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            cookie: cookies,
+            Referer: `https://kick.com/${channelInfo.slug}`,
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+          },
+          body: JSON.stringify({ content: messageContent, type: "message" }),
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to send message: ${response.status} ${response.statusText}`,
+        );
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to send message: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   };
 
   const banUser = async (
@@ -301,8 +348,6 @@ export const createClient = (
     if (!channelInfo) {
       throw new Error("Channel info not available");
     }
-
-    checkAuth();
 
     if (!targetUser) {
       throw new Error("Specify a user to ban");
@@ -318,12 +363,7 @@ export const createClient = (
       }
     }
 
-    const headers = createHeaders({
-      bearerToken: clientBearerToken!,
-      xsrfToken: clientToken!,
-      cookies: clientCookies!,
-      channelSlug: channelInfo.slug,
-    });
+    const headers = getHeaders(channelInfo.slug);
 
     try {
       const data = permanent
@@ -334,24 +374,29 @@ export const createClient = (
             permanent: false,
           };
 
-      const result = await makeRequest<{ success: boolean }>(
+      await makeRequest<{ success: boolean }>(
         "post",
         `https://kick.com/api/v2/channels/${channelInfo.id}/bans`,
         headers,
         data,
       );
 
-      if (result) {
+      if (mergedOptions.logger) {
         console.log(
           `User ${targetUser} ${permanent ? "banned" : "timed out"} successfully`,
         );
-      } else {
-        console.error(`Failed to ${permanent ? "ban" : "time out"} user.`);
       }
     } catch (error) {
-      console.error(
-        `Error ${permanent ? "banning" : "timing out"} user:`,
-        error,
+      if (mergedOptions.logger) {
+        console.error(
+          `Error ${permanent ? "banning" : "timing out"} user:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      throw new Error(
+        `Failed to ${permanent ? "ban" : "time out"} user ${targetUser}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   };
@@ -361,33 +406,34 @@ export const createClient = (
       throw new Error("Channel info not available");
     }
 
-    checkAuth();
-
     if (!targetUser) {
       throw new Error("Specify a user to unban");
     }
 
-    const headers = createHeaders({
-      bearerToken: clientBearerToken!,
-      xsrfToken: clientToken!,
-      cookies: clientCookies!,
-      channelSlug: channelInfo.slug,
-    });
+    const headers = getHeaders(channelInfo.slug);
 
     try {
-      const result = await makeRequest<{ success: boolean }>(
+      await makeRequest<{ success: boolean }>(
         "delete",
         `https://kick.com/api/v2/channels/${channelInfo.id}/bans/${targetUser}`,
         headers,
       );
 
-      if (result) {
+      if (mergedOptions.logger) {
         console.log(`User ${targetUser} unbanned successfully`);
-      } else {
-        console.error(`Failed to unban user.`);
       }
     } catch (error) {
-      console.error("Error unbanning user:", error);
+      if (mergedOptions.logger) {
+        console.error(
+          "Error unbanning user:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+      throw new Error(
+        `Failed to unban user ${targetUser}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   };
 
@@ -396,33 +442,34 @@ export const createClient = (
       throw new Error("Channel info not available");
     }
 
-    checkAuth();
-
     if (!messageId) {
       throw new Error("Specify a messageId to delete");
     }
 
-    const headers = createHeaders({
-      bearerToken: clientBearerToken!,
-      xsrfToken: clientToken!,
-      cookies: clientCookies!,
-      channelSlug: channelInfo.slug,
-    });
+    const headers = getHeaders(channelInfo.slug);
 
     try {
-      const result = await makeRequest<{ success: boolean }>(
+      await makeRequest<{ success: boolean }>(
         "delete",
         `https://kick.com/api/v2/channels/${channelInfo.id}/messages/${messageId}`,
         headers,
       );
 
-      if (result) {
+      if (mergedOptions.logger) {
         console.log(`Message ${messageId} deleted successfully`);
-      } else {
-        console.error(`Failed to delete message.`);
       }
     } catch (error) {
-      console.error("Error deleting message:", error);
+      if (mergedOptions.logger) {
+        console.error(
+          "Error deleting message:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+      throw new Error(
+        `Failed to delete message ${messageId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   };
 
@@ -430,8 +477,6 @@ export const createClient = (
     if (!channelInfo) {
       throw new Error("Channel info not available");
     }
-
-    checkAuth();
 
     if (mode !== "on" && mode !== "off") {
       throw new Error("Invalid mode, must be either 'on' or 'off'");
@@ -443,12 +488,7 @@ export const createClient = (
       );
     }
 
-    const headers = createHeaders({
-      bearerToken: clientBearerToken!,
-      xsrfToken: clientToken!,
-      cookies: clientCookies!,
-      channelSlug: channelInfo.slug,
-    });
+    const headers = getHeaders(channelInfo.slug);
 
     try {
       const data =
@@ -456,28 +496,31 @@ export const createClient = (
           ? { slow_mode: false }
           : { slow_mode: true, message_interval: durationInSeconds };
 
-      const result = await makeRequest<{ success: boolean }>(
+      await makeRequest<{ success: boolean }>(
         "put",
         `https://kick.com/api/v2/channels/${channelInfo.slug}/chatroom`,
         headers,
         data,
       );
 
-      if (result?.success) {
+      if (mergedOptions.logger) {
         console.log(
           mode === "off"
             ? "Slow mode disabled successfully"
             : `Slow mode enabled with ${durationInSeconds} second interval`,
         );
-      } else {
-        console.error(
-          `Failed to ${mode === "off" ? "disable" : "enable"} slow mode.`,
-        );
       }
     } catch (error) {
-      console.error(
-        `Error ${mode === "off" ? "disabling" : "enabling"} slow mode:`,
-        error,
+      if (mergedOptions.logger) {
+        console.error(
+          `Error ${mode === "off" ? "disabling" : "enabling"} slow mode:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      throw new Error(
+        `Failed to ${mode === "off" ? "disable" : "enable"} slow mode: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   };
@@ -489,12 +532,7 @@ export const createClient = (
       throw new Error("Channel info not available");
     }
 
-    const headers = createHeaders({
-      bearerToken: clientBearerToken!,
-      xsrfToken: clientToken!,
-      cookies: clientCookies!,
-      channelSlug: channel,
-    });
+    const headers = getHeaders(channel);
 
     try {
       const result = await makeRequest<Poll>(
@@ -503,15 +541,19 @@ export const createClient = (
         headers,
       );
 
-      if (result) {
+      if (mergedOptions.logger) {
         console.log(`Poll retrieved successfully for channel: ${channel}`);
-        return result;
       }
+      return result;
     } catch (error) {
-      console.error(`Error retrieving poll for channel ${channel}:`, error);
+      if (mergedOptions.logger) {
+        console.error(
+          `Error retrieving poll for channel ${channel}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      return null;
     }
-
-    return null;
   };
 
   const getLeaderboards = async (targetChannel?: string) => {
@@ -521,12 +563,7 @@ export const createClient = (
       throw new Error("Channel info not available");
     }
 
-    const headers = createHeaders({
-      bearerToken: clientBearerToken!,
-      xsrfToken: clientToken!,
-      cookies: clientCookies!,
-      channelSlug: channel,
-    });
+    const headers = getHeaders(channel);
 
     try {
       const result = await makeRequest<Leaderboard>(
@@ -535,25 +572,32 @@ export const createClient = (
         headers,
       );
 
-      if (result) {
+      if (mergedOptions.logger) {
         console.log(
           `Leaderboards retrieved successfully for channel: ${channel}`,
         );
-        return result;
       }
+      return result;
     } catch (error) {
-      console.error(
-        `Error retrieving leaderboards for channel ${channel}:`,
-        error,
-      );
+      if (mergedOptions.logger) {
+        console.error(
+          `Error retrieving leaderboards for channel ${channel}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      return null;
     }
+  };
 
-    return null;
+  const destroy = () => {
+    wsHandle?.close();
+    wsHandle = null;
   };
 
   return {
     login,
     on,
+    destroy,
     get user() {
       return getUser();
     },

@@ -6,4 +6,12 @@ export default defineConfig({
   dts: true,
   outDir: "dist",
   clean: true,
+  external: [
+    "puppeteer",
+    "puppeteer-extra",
+    "puppeteer-extra-plugin-stealth",
+    "ws",
+    "axios",
+    "otplib",
+  ],
 });

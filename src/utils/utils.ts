@@ -1,6 +1,14 @@
-import type { AuthenticationSettings, LoginOptions } from "../types/client";
+import { type LoginOptions } from "../types/client";
 
 export const parseJSON = <T>(json: string): T => JSON.parse(json) as T;
+
+export const decodeXsrfToken = (token: string): string => {
+  try {
+    return decodeURIComponent(token);
+  } catch {
+    return token;
+  }
+};
 
 export const validateCredentials = (options: LoginOptions) => {
   const { type, credentials } = options;
@@ -13,10 +21,10 @@ export const validateCredentials = (options: LoginOptions) => {
         throw new Error("Password is required and must be a string");
       }
       if (
-        !credentials.otp_secret ||
+        credentials.otp_secret !== undefined &&
         typeof credentials.otp_secret !== "string"
       ) {
-        throw new Error("OTP secret is required and must be a string");
+        throw new Error("OTP secret must be a string if provided");
       }
       break;
     case "tokens":

@@ -1,4 +1,4 @@
-import type { Livestream } from "./video";
+import { type Livestream } from "./video";
 
 export interface KickChannelInfo {
   id: number;
@@ -30,8 +30,8 @@ export interface Chatroom {
   id: number;
   chatable_type: string;
   channel_id: number;
-  created_at: Date;
-  updated_at: Date;
+  created_at: string;
+  updated_at: string;
   chat_mode_old: string;
   chat_mode: string;
   slow_mode: boolean;
@@ -83,7 +83,7 @@ export interface User {
   id: number;
   username: string;
   agreed_to_terms: boolean;
-  email_verified_at: Date;
+  email_verified_at: string;
   bio: string;
   country: null;
   state: null;

@@ -36,7 +36,7 @@ client.on("ChatMessage", async (message: MessageData) => {
     const splitMessage = message.content.split(" ");
     const duration = splitMessage[1];
     if (duration) {
-      const durationInSeconds = parseInt(duration);
+      const durationInSeconds = parseInt(duration, 10);
       client.slowMode("on", durationInSeconds);
     }
   }
@@ -51,13 +51,26 @@ client.on("Subscription", async (subscription) => {
 
 // get information about a vod
 const { title, duration, thumbnail, views } = await client.vod("your-video-id");
+console.log(`VOD info: ${title} (${duration}s, ${views} views) - ${thumbnail}`);
 
 // to get the current poll in a channel in the channel the bot is in
 const poll = await client.getPoll();
+console.log("Current poll:", poll?.data.title);
 // or you can pass a specific channel to get the poll in that channel.
 // example: const poll = await client.getPoll("xqc");
 
 // get leaderboards for the channel the bot is in
 const leaderboards = await client.getLeaderboards();
+console.log("Top gifters:", leaderboards?.gifts);
 // or you can pass a specific channel to get the leaderboards in that channel.
 // example: const leaderboards = await client.getLeaderboards("xqc");
+
+process.on("SIGINT", () => {
+  client.destroy();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  client.destroy();
+  process.exit(0);
+});

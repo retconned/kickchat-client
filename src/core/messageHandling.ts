@@ -1,13 +1,13 @@
-import type {
-  MessageEvent,
-  ChatMessage,
-  Subscription,
-  GiftedSubscriptionsEvent,
-  StreamHostEvent,
-  UserBannedEvent,
-  UserUnbannedEvent,
-  PinnedMessageCreatedEvent,
-  MessageDeletedEvent,
+import {
+  type ChatMessage,
+  type GiftedSubscriptionsEvent,
+  type MessageDeletedEvent,
+  type MessageEvent,
+  type PinnedMessageCreatedEvent,
+  type StreamHostEvent,
+  type Subscription,
+  type UserBannedEvent,
+  type UserUnbannedEvent,
 } from "../types/events";
 import { parseJSON } from "../utils/utils";
 
@@ -69,8 +69,6 @@ export const parseMessage = (message: string) => {
         return null;
       }
     }
-
-    return null;
   } catch (error) {
     console.error("Error parsing message:", error);
     return null;

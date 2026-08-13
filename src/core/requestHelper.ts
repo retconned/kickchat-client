@@ -1,15 +1,6 @@
-import axios, { type AxiosResponse } from "axios";
+import axios, { AxiosHeaders, type AxiosResponse } from "axios";
 
-import { AxiosHeaders } from "axios";
-
-export interface ApiHeaders extends AxiosHeaders {
-  accept: string;
-  authorization: string;
-  "content-type": string;
-  "x-xsrf-token": string;
-  cookie: string;
-  Referer: string;
-}
+import { decodeXsrfToken } from "../utils/utils";
 
 export interface RequestConfig {
   bearerToken: string;
@@ -20,6 +11,7 @@ export interface RequestConfig {
 
 export const createHeaders = ({
   bearerToken,
+  xsrfToken,
   cookies,
   channelSlug,
 }: RequestConfig): AxiosHeaders => {
@@ -33,6 +25,7 @@ export const createHeaders = ({
   headers.set("content-type", "application/json");
   headers.set("priority", "u=1, i");
   headers.set("cookie", cookies);
+  headers.set("x-xsrf-token", decodeXsrfToken(xsrfToken));
   headers.set("Referer", `https://kick.com/${channelSlug}`);
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
 
@@ -44,22 +37,17 @@ export const makeRequest = async <T>(
   url: string,
   headers: AxiosHeaders,
   data?: unknown,
-): Promise<T | null> => {
-  try {
-    const response: AxiosResponse<T> = await axios({
-      method,
-      url,
-      headers,
-      data,
-    });
+): Promise<T> => {
+  const response: AxiosResponse<T> = await axios({
+    method,
+    url,
+    headers,
+    data,
+  });
 
-    if (response.status === 200) {
-      return response.data;
-    }
-    console.error(`Request failed with status: ${response.status}`);
-    return null;
-  } catch (error) {
-    console.error(`Request error for ${url}:`, error);
-    return null;
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Request failed with status: ${response.status}`);
   }
+
+  return response.data;
 };
