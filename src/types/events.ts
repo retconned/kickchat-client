@@ -101,6 +101,22 @@ export interface UserUnbannedEvent {
   };
 }
 
+export interface PollUpdateEvent {
+  poll: {
+    title: string;
+    options: { id: number; label: string; votes: number }[];
+    duration: number;
+    remaining: number;
+    result_display_duration: number;
+    has_voted: boolean;
+    voted_option_id: number | null;
+  };
+}
+
+export interface PollDeleteEvent {
+  poll_id: string;
+}
+
 export interface PinnedMessageCreatedEvent {
   message: {
     id: string;

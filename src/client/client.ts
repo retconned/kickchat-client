@@ -1,17 +1,17 @@
 import EventEmitter from "node:events";
-import { authentication, getChannelData, getVideoData } from "../core/kickApi";
-import { parseMessage } from "../core/messageHandling";
-import { createHeaders, makeRequest } from "../core/requestHelper";
+import { authentication, getChannelData, getVideoData } from "../core/kick-api";
+import { parseMessage } from "../core/message-handling";
+import { createHeaders, makeRequest } from "../core/request-helper";
 import { createReconnectingWebSocket } from "../core/websocket";
 import { type KickChannelInfo } from "../types/channels";
 import {
+  type ClientEvents,
   type ClientOptions,
   type KickClient,
   type Leaderboard,
   type LoginOptions,
   type Poll,
 } from "../types/client";
-import { type MessageData } from "../types/events";
 import { type VideoInfo } from "../types/video";
 import { decodeXsrfToken, validateCredentials } from "../utils/utils";
 
@@ -20,7 +20,15 @@ export const createClient = (
   options: ClientOptions = {},
 ): KickClient => {
   const emitter = new EventEmitter();
-  emitter.on("error", () => {});
+
+  const emitError = (error: unknown) => {
+    if (emitter.listenerCount("error") > 0) {
+      emitter.emit("error", error);
+    } else {
+      console.error("Unhandled client error:", error);
+    }
+  };
+
   let channelInfo: KickChannelInfo | null = null;
   let videoInfo: VideoInfo | null = null;
   let wsHandle: { close: () => void } | null = null;
@@ -148,9 +156,6 @@ export const createClient = (
       }
 
       channelInfo = await getChannelData(channelName);
-      if (!channelInfo) {
-        throw new Error("Unable to fetch channel data");
-      }
 
       if (mergedOptions.logger) {
         console.log(
@@ -171,11 +176,11 @@ export const createClient = (
             switch (parsedMessage.type) {
               case "ChatMessage":
                 if (mergedOptions.plainEmote) {
-                  const messageData = parsedMessage.data as MessageData;
-                  messageData.content = messageData.content.replace(
-                    /\[emote:(\d+):(\w+)\]/g,
-                    (_, __, emoteName) => emoteName,
-                  );
+                  parsedMessage.data.content =
+                    parsedMessage.data.content.replace(
+                      /\[emote:(\d+):(\w+)\]/g,
+                      (_, __, emoteName) => emoteName,
+                    );
                 }
                 break;
               case "Subscription":
@@ -204,7 +209,7 @@ export const createClient = (
             "WebSocket error:",
             error instanceof Error ? error.message : error,
           );
-          emitter.emit("error", error);
+          emitError(error);
         },
       });
     } catch (error) {
@@ -218,12 +223,14 @@ export const createClient = (
 
   if (mergedOptions.readOnly === true) {
     void initialize().catch((error) => {
-      emitter.emit("error", error);
+      emitError(error);
     });
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: event listeners accept arbitrary payloads.
-  const on = (event: string, listener: (...args: any[]) => void) => {
+  const on = <K extends keyof ClientEvents>(
+    event: K,
+    listener: ClientEvents[K],
+  ) => {
     emitter.on(event, listener);
   };
 
@@ -238,10 +245,6 @@ export const createClient = (
 
   const vod = async (video_id: string) => {
     videoInfo = await getVideoData(video_id);
-
-    if (!videoInfo) {
-      throw new Error("Unable to fetch video data");
-    }
 
     if (!videoInfo.livestream) {
       throw new Error("Unable to fetch livestream data");
@@ -483,10 +486,6 @@ export const createClient = (
       throw new Error("Channel info not available");
     }
 
-    if (mode !== "on" && mode !== "off") {
-      throw new Error("Invalid mode, must be either 'on' or 'off'");
-    }
-
     if (mode === "on" && (!durationInSeconds || durationInSeconds < 1)) {
       throw new Error(
         "Invalid duration, must be greater than 0 if mode is 'on'",
@@ -531,7 +530,7 @@ export const createClient = (
     }
   };
 
-  const getPoll = async (targetChannel?: string) => {
+  const getPoll = async (targetChannel?: string): Promise<Poll> => {
     const channel = targetChannel || channelName;
 
     if (!targetChannel && !channelInfo) {
@@ -558,11 +557,18 @@ export const createClient = (
           error instanceof Error ? error.message : error,
         );
       }
-      return null;
+      throw new Error(
+        `Failed to retrieve poll for channel ${channel}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
     }
   };
 
-  const getLeaderboards = async (targetChannel?: string) => {
+  const getLeaderboards = async (
+    targetChannel?: string,
+  ): Promise<Leaderboard> => {
     const channel = targetChannel || channelName;
 
     if (!targetChannel && !channelInfo) {
@@ -591,13 +597,19 @@ export const createClient = (
           error instanceof Error ? error.message : error,
         );
       }
-      return null;
+      throw new Error(
+        `Failed to retrieve leaderboards for channel ${channel}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
     }
   };
 
   const destroy = () => {
     wsHandle?.close();
     wsHandle = null;
+    emitter.removeAllListeners();
   };
 
   return {

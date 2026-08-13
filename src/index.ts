@@ -2,13 +2,15 @@ export { createClient } from "./client/client";
 export type { Chatroom, KickChannelInfo } from "./types/channels";
 export type {
   AuthenticationSettings,
+  ClientEvents,
   ClientOptions,
-  EventHandler,
   Gift,
   KickClient,
+  KickClientUser,
   Leaderboard,
   LoginOptions,
   Poll,
+  PollData,
   Video,
 } from "./types/client";
 export type {
@@ -18,6 +20,8 @@ export type {
   MessageDeletedEvent,
   MessageEvent,
   PinnedMessageCreatedEvent,
+  PollDeleteEvent,
+  PollUpdateEvent,
   StreamHostEvent,
   Subscription,
   SubscriptionData,

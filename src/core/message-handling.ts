@@ -4,6 +4,8 @@ import {
   type MessageDeletedEvent,
   type MessageEvent,
   type PinnedMessageCreatedEvent,
+  type PollDeleteEvent,
+  type PollUpdateEvent,
   type StreamHostEvent,
   type Subscription,
   type UserBannedEvent,
@@ -11,7 +13,20 @@ import {
 } from "../types/events";
 import { parseJSON } from "../utils/utils";
 
-export const parseMessage = (message: string) => {
+export type ParsedMessage =
+  | { type: "ChatMessage"; data: ChatMessage }
+  | { type: "Subscription"; data: Subscription }
+  | { type: "GiftedSubscriptions"; data: GiftedSubscriptionsEvent }
+  | { type: "StreamHost"; data: StreamHostEvent }
+  | { type: "MessageDeleted"; data: MessageDeletedEvent }
+  | { type: "UserBanned"; data: UserBannedEvent }
+  | { type: "UserUnbanned"; data: UserUnbannedEvent }
+  | { type: "PinnedMessageCreated"; data: PinnedMessageCreatedEvent }
+  | { type: "PinnedMessageDeleted"; data: MessageDeletedEvent }
+  | { type: "PollUpdate"; data: PollUpdateEvent }
+  | { type: "PollDelete"; data: PollDeleteEvent };
+
+export const parseMessage = (message: string): ParsedMessage | null => {
   try {
     const messageEventJSON = parseJSON<MessageEvent>(message);
 
@@ -56,11 +71,11 @@ export const parseMessage = (message: string) => {
         return { type: "PinnedMessageDeleted", data };
       }
       case "App\\Events\\PollUpdateEvent": {
-        const data = parseJSON(messageEventJSON.data);
+        const data = parseJSON<PollUpdateEvent>(messageEventJSON.data);
         return { type: "PollUpdate", data };
       }
       case "App\\Events\\PollDeleteEvent": {
-        const data = parseJSON(messageEventJSON.data);
+        const data = parseJSON<PollDeleteEvent>(messageEventJSON.data);
         return { type: "PollDelete", data };
       }
 

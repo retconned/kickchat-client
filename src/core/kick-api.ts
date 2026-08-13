@@ -23,13 +23,10 @@ const setupPuppeteer = async () => {
 
 export const getChannelData = async (
   channel: string,
-): Promise<KickChannelInfo | null> => {
-  let browser: { close: () => Promise<void> } | null = null;
+): Promise<KickChannelInfo> => {
+  const { browser, page } = await setupPuppeteer();
 
   try {
-    const { browser: setupBrowser, page } = await setupPuppeteer();
-    browser = setupBrowser;
-
     const response = await page.goto(
       `https://kick.com/api/v2/channels/${channel}`,
     );
@@ -52,22 +49,21 @@ export const getChannelData = async (
 
     return jsonContent;
   } catch (error) {
-    console.error("Error getting channel data:", error);
-    return null;
+    throw new Error(
+      `Failed to fetch channel data: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
   } finally {
-    await browser?.close();
+    await browser.close();
   }
 };
 
-export const getVideoData = async (
-  video_id: string,
-): Promise<VideoInfo | null> => {
-  let browser: { close: () => Promise<void> } | null = null;
+export const getVideoData = async (video_id: string): Promise<VideoInfo> => {
+  const { browser, page } = await setupPuppeteer();
 
   try {
-    const { browser: setupBrowser, page } = await setupPuppeteer();
-    browser = setupBrowser;
-
     const response = await page.goto(
       `https://kick.com/api/v1/video/${video_id}`,
     );
@@ -90,10 +86,14 @@ export const getVideoData = async (
 
     return jsonContent;
   } catch (error) {
-    console.error("Error getting video data:", error);
-    return null;
+    throw new Error(
+      `Failed to fetch video data: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
   } finally {
-    await browser?.close();
+    await browser.close();
   }
 };
 
@@ -117,39 +117,33 @@ export const authentication = async ({
     defaultViewport: null,
   });
 
-  let page: Awaited<ReturnType<typeof browser.newPage>>;
+  const selectorTimeout = 6000;
 
   try {
-    page = await browser.newPage();
+    const page = await browser.newPage();
     // Enable request interception
     await page.setRequestInterception(true);
-  } catch (error) {
-    await browser.close();
-    throw error;
-  }
 
-  // Monitor all requests
-  page.on("request", (request) => {
-    const url = request.url();
-    const headers = request.headers();
+    // Monitor all requests
+    page.on("request", (request) => {
+      const url = request.url();
+      const headers = request.headers();
 
-    if (url.includes("/api/v2/channels/followed")) {
-      const reqBearerToken = headers.authorization || "";
-      cookieString = headers.cookie || "";
+      if (url.includes("/api/v2/channels/followed")) {
+        const reqBearerToken = headers.authorization || "";
+        cookieString = headers.cookie || "";
 
-      if (!bearerToken && reqBearerToken.includes("Bearer ")) {
-        const splitToken = reqBearerToken.split("Bearer ")[1];
-        if (splitToken) {
-          bearerToken = splitToken;
+        if (!bearerToken && reqBearerToken.includes("Bearer ")) {
+          const splitToken = reqBearerToken.split("Bearer ")[1];
+          if (splitToken) {
+            bearerToken = splitToken;
+          }
         }
       }
-    }
 
-    request.continue();
-  });
+      request.continue();
+    });
 
-  const selectorTimeout = 6000;
-  try {
     await page.goto("https://kick.com/");
     await page.waitForSelector("nav > div:nth-child(3) > button:first-child", {
       visible: true,

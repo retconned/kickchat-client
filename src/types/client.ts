@@ -1,6 +1,16 @@
+import {
+  type GiftedSubscriptionsEvent,
+  type MessageData,
+  type MessageDeletedEvent,
+  type PinnedMessageCreatedEvent,
+  type PollDeleteEvent,
+  type PollUpdateEvent,
+  type StreamHostEvent,
+  type Subscription,
+  type UserBannedEvent,
+  type UserUnbannedEvent,
+} from "./events";
 import { type Channel, type Livestream } from "./video";
-
-export type EventHandler<T> = (data: T) => void;
 
 export interface ClientOptions {
   plainEmote?: boolean;
@@ -25,17 +35,38 @@ export interface Video {
   channel: Channel;
 }
 
+export interface KickClientUser {
+  id: number;
+  username: string;
+  tag: string;
+}
+
+export interface ClientEvents {
+  ready: (user: KickClientUser) => void;
+  ChatMessage: (data: MessageData) => void;
+  Subscription: (data: Subscription) => void;
+  GiftedSubscriptions: (data: GiftedSubscriptionsEvent) => void;
+  StreamHost: (data: StreamHostEvent) => void;
+  MessageDeleted: (data: MessageDeletedEvent) => void;
+  UserBanned: (data: UserBannedEvent) => void;
+  UserUnbanned: (data: UserUnbannedEvent) => void;
+  PinnedMessageCreated: (data: PinnedMessageCreatedEvent) => void;
+  PinnedMessageDeleted: (data: MessageDeletedEvent) => void;
+  PollUpdate: (data: PollUpdateEvent) => void;
+  PollDelete: (data: PollDeleteEvent) => void;
+  disconnect: () => void;
+  error: (error: unknown) => void;
+}
+
 export interface KickClient {
   destroy: () => void;
-  // biome-ignore lint/suspicious/noExplicitAny: event listeners accept arbitrary payloads.
-  on: (event: string, listener: (...args: any[]) => void) => void;
+  on: <K extends keyof ClientEvents>(
+    event: K,
+    listener: ClientEvents[K],
+  ) => void;
   vod: (video_id: string) => Promise<Video>;
   login: (credentials: LoginOptions) => Promise<boolean>;
-  user: {
-    id: number;
-    username: string;
-    tag: string;
-  } | null;
+  user: KickClientUser | null;
   sendMessage: (messageContent: string) => Promise<void>;
   banUser: (
     targetUser: string,
@@ -45,8 +76,8 @@ export interface KickClient {
   unbanUser: (targetUser: string) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
   slowMode: (mode: "on" | "off", durationInSeconds?: number) => Promise<void>;
-  getPoll: (targetChannel?: string) => Promise<Poll | null>;
-  getLeaderboards: (targetChannel?: string) => Promise<Leaderboard | null>;
+  getPoll: (targetChannel?: string) => Promise<Poll>;
+  getLeaderboards: (targetChannel?: string) => Promise<Leaderboard>;
 }
 
 export interface AuthenticationSettings {
@@ -70,26 +101,24 @@ export type LoginOptions =
   | { type: "login"; credentials: LoginCredentials }
   | { type: "tokens"; credentials: TokenCredentials };
 
+export interface PollData {
+  title: string;
+  duration: number;
+  result_display_duration: number;
+  created_at: string;
+  options: { id: number; label: string; votes: number }[];
+  remaining: number;
+  has_voted: boolean;
+  voted_option_id: number | null;
+}
+
 export type Poll = {
   status: {
     code: number;
     message: string;
     error: boolean;
   };
-  data: {
-    title: string;
-    duration: number;
-    result_display_duration: number;
-    created_at: string;
-    options: {
-      id: number;
-      label: string;
-      votes: number;
-    }[];
-    remaining: number;
-    has_voted: boolean;
-    voted_option_id: number | null;
-  };
+  data: PollData | null;
 };
 
 export type Leaderboard = {
