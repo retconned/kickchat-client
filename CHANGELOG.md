@@ -1,5 +1,11 @@
 # @retconned/kick-js
 
+## 0.6.0
+
+### Minor Changes
+
+- 7328f54: adds ws reconnection logic, expands type exports, and fixes lingering type and bug issues across handlers and api
+
 ## 0.5.4
 
 ### Patch Changes
