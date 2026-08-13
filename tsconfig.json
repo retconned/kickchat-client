@@ -18,6 +18,10 @@
     /* If transpiling with TypeScript: */
     "module": "Preserve",
 
+    /* TS 6 deprecations: tsup's dts injects `baseUrl`; harmless here (no non-relative imports),
+       so silence the TS5101 deprecation error until TS 7 removes it. */
+    "ignoreDeprecations": "6.0",
+
     /* might be deleted later */
 
     // "lib": ["es2022"],

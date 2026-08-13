@@ -26,8 +26,9 @@
   ],
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   },
+  "packageManager": "pnpm@11.21.0",
   "license": "MIT",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -60,13 +61,13 @@
     }
   },
   "devDependencies": {
-    "@arethetypeswrong/cli": "^0.15.4",
+    "@arethetypeswrong/cli": "^0.18.5",
     "@biomejs/biome": "^2.5.8",
-    "@changesets/cli": "^2.27.8",
-    "@types/ws": "^8.5.12",
-    "tsup": "^8.2.4",
-    "tsx": "^4.19.1",
-    "typescript": "^5.5.4",
+    "@changesets/cli": "^3.0.0",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3",
     "vitest": "^2.1.1"
   },
   "dependencies": {
