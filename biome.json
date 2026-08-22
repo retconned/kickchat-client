@@ -7,7 +7,11 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!examples/basic-bot.ts"]
+    "includes": [
+      "**",
+      "!examples/basic-bot.ts",
+      "!examples/harvest-credentials.js"
+    ]
   },
   "formatter": {
     "enabled": true,

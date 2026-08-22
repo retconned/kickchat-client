@@ -1,7 +1,14 @@
 import EventEmitter from "node:events";
-import { authentication, getChannelData, getVideoData } from "../core/kick-api";
+import { buildSession, type KickSession } from "../auth/session";
+import { getChannelData, getVideoData, KICK_API_BASE } from "../core/kick-api";
 import { parseMessage } from "../core/message-handling";
-import { createHeaders, makeRequest } from "../core/request-helper";
+import {
+  createRequestContext,
+  DEFAULT_TIMEOUT_MS,
+  isAuthExpiredError,
+  makeRequest,
+  type RequestContext,
+} from "../core/request-helper";
 import { createReconnectingWebSocket } from "../core/websocket";
 import { type KickChannelInfo } from "../types/channels";
 import {
@@ -12,13 +19,15 @@ import {
   type LoginOptions,
   type Poll,
 } from "../types/client";
-import { type VideoInfo } from "../types/video";
-import { decodeXsrfToken, validateCredentials } from "../utils/utils";
 
 export const createClient = (
   channelName: string,
   options: ClientOptions = {},
 ): KickClient => {
+  if (typeof channelName !== "string" || channelName.trim().length === 0) {
+    throw new Error("createClient requires a non-empty channel name");
+  }
+
   const emitter = new EventEmitter();
 
   const emitError = (error: unknown) => {
@@ -29,194 +38,208 @@ export const createClient = (
     }
   };
 
+  const log = (message: string) => {
+    if (mergedOptions.logger) {
+      console.log(message);
+    }
+  };
+
   let channelInfo: KickChannelInfo | null = null;
-  let videoInfo: VideoInfo | null = null;
   let wsHandle: { close: () => void } | null = null;
 
-  let clientToken: string | null = null;
-  let clientCookies: string | null = null;
-  let clientBearerToken: string | null = null;
-  let isLoggedIn = false;
+  let session: KickSession | null = null;
+  let destroyed = false;
+  let generation = 0;
 
   const defaultOptions: ClientOptions = {
     plainEmote: true,
     logger: false,
     readOnly: false,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
   };
 
   const mergedOptions = { ...defaultOptions, ...options };
 
-  const getHeaders = (channelSlug: string) => {
-    const bearerToken = clientBearerToken;
-    const xsrfToken = clientToken;
-    const cookies = clientCookies;
-
-    if (!isLoggedIn) {
-      throw new Error("Authentication required. Please login first.");
+  const assertUsable = () => {
+    if (destroyed) {
+      throw new Error("Client has been destroyed");
     }
-    if (!bearerToken) {
-      throw new Error("Missing bearer token");
-    }
-    if (!xsrfToken) {
-      throw new Error("Missing XSRF token");
-    }
-    if (!cookies) {
-      throw new Error("Missing cookies");
-    }
-
-    return createHeaders({ bearerToken, xsrfToken, cookies, channelSlug });
   };
 
-  const login = async (options: LoginOptions) => {
+  const requireSession = (): KickSession => {
+    if (!session) {
+      throw new Error("Authentication required. Please login first.");
+    }
+    return session;
+  };
+
+  const requireChannel = (): KickChannelInfo => {
+    if (!channelInfo) {
+      throw new Error("Channel info not available");
+    }
+    return channelInfo;
+  };
+
+  const withAuthGuard = async <T>(action: () => Promise<T>): Promise<T> => {
+    try {
+      return await action();
+    } catch (error) {
+      if (isAuthExpiredError(error)) {
+        log("Session expired — please login again.");
+        emitter.emit("authExpired");
+      }
+      throw error;
+    }
+  };
+
+  const getRequestContext = (channelSlug: string): RequestContext =>
+    createRequestContext(
+      { session: requireSession(), channelSlug },
+      mergedOptions.timeoutMs,
+    );
+
+  interface AuthedCall {
+    slug: string;
+    verb: "get" | "post" | "put" | "delete";
+    url: string;
+    data?: unknown;
+  }
+
+  interface ActionLabels {
+    fail: string;
+    error: string;
+    success?: string;
+  }
+
+  const performAuthedAction = async <T>(
+    call: AuthedCall,
+    labels: ActionLabels,
+  ): Promise<T> => {
+    assertUsable();
+
+    const request = getRequestContext(call.slug);
+
+    try {
+      const result = await withAuthGuard(() =>
+        makeRequest<T>(call.verb, call.url, request, call.data),
+      );
+
+      if (labels.success) {
+        log(labels.success);
+      }
+      return result;
+    } catch (error) {
+      if (mergedOptions.logger) {
+        console.error(
+          labels.error,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      throw new Error(
+        `Failed to ${labels.fail}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+  };
+
+  const login = async (credentials: LoginOptions): Promise<void> => {
+    assertUsable();
+
     if (mergedOptions.readOnly === true) {
       throw new Error("Read-only mode does not support authentication");
     }
 
-    const { type, credentials } = options;
+    const previousSession = session;
 
     try {
-      switch (type) {
-        case "login": {
-          if (!credentials) {
-            throw new Error("Credentials are required for login");
-          }
-          validateCredentials(options);
+      log("Starting authentication process ...");
 
-          if (mergedOptions.logger) {
-            console.log("Starting authentication process with login ...");
-          }
+      session = buildSession(credentials);
 
-          const { bearerToken, xsrfToken, cookies, isAuthenticated } =
-            await authentication({
-              username: credentials.username,
-              password: credentials.password,
-              otp_secret: credentials.otp_secret,
-            });
-
-          if (mergedOptions.logger) {
-            console.log("Authentication tokens received, validating...");
-          }
-
-          clientBearerToken = bearerToken;
-          clientToken = xsrfToken;
-          clientCookies = cookies;
-          isLoggedIn = isAuthenticated;
-
-          if (!isAuthenticated) {
-            throw new Error("Authentication failed");
-          }
-
-          if (mergedOptions.logger) {
-            console.log("Authentication successful, initializing client...");
-          }
-
-          await initialize();
-          break;
-        }
-
-        case "tokens":
-          if (!credentials) {
-            throw new Error("Tokens are required for login");
-          }
-
-          if (mergedOptions.logger) {
-            console.log("Starting authentication process with tokens ...");
-          }
-
-          clientBearerToken = credentials.bearerToken;
-          clientToken = credentials.xsrfToken;
-          clientCookies = credentials.cookies;
-
-          isLoggedIn = true;
-
-          await initialize();
-          break;
-        default:
-          throw new Error("Invalid authentication type");
-      }
-
-      return true;
-    } catch (error) {
-      console.error(
-        "Login failed:",
-        error instanceof Error ? error.message : error,
+      log(
+        `Credentials accepted (access token promoted${
+          Object.keys(session.cookies).length > 0
+            ? `, ${Object.keys(session.cookies).length} cookies`
+            : ", no cookies"
+        }), initializing client...`,
       );
+
+      await initialize();
+    } catch (error) {
+      session = previousSession;
+      if (mergedOptions.logger) {
+        console.error(
+          "Login failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
       throw error;
     }
   };
 
   const initialize = async () => {
+    const gen = generation;
+
     try {
-      if (mergedOptions.readOnly === false && !isLoggedIn) {
+      if (mergedOptions.readOnly === false && !session) {
         throw new Error("Authentication required. Please login first.");
       }
 
-      if (mergedOptions.logger) {
-        console.log(`Fetching channel data for: ${channelName}`);
+      log(`Fetching channel data for: ${channelName}`);
+
+      const info = await getChannelData(channelName);
+
+      if (gen !== generation) {
+        log(`Initialization for: ${channelName} was superseded, aborting.`);
+        return;
       }
 
-      channelInfo = await getChannelData(channelName);
+      wsHandle?.close();
 
-      if (mergedOptions.logger) {
-        console.log(
-          "Channel data received, establishing WebSocket connection...",
-        );
-      }
+      channelInfo = info;
+
+      log("Channel data received, establishing WebSocket connection...");
 
       wsHandle = createReconnectingWebSocket(channelInfo.chatroom.id, {
         onOpen: () => {
-          if (mergedOptions.logger) {
-            console.log(`Connected to channel: ${channelName}`);
-          }
+          log(`Connected to channel: ${channelName}`);
           emitter.emit("ready", getUser());
         },
         onMessage: (data) => {
           const parsedMessage = parseMessage(data.toString());
-          if (parsedMessage) {
-            switch (parsedMessage.type) {
-              case "ChatMessage":
-                if (mergedOptions.plainEmote) {
-                  parsedMessage.data.content =
-                    parsedMessage.data.content.replace(
-                      /\[emote:(\d+):(\w+)\]/g,
-                      (_, __, emoteName) => emoteName,
-                    );
-                }
-                break;
-              case "Subscription":
-              case "GiftedSubscriptions":
-              case "StreamHost":
-              case "MessageDeleted":
-              case "UserBanned":
-              case "UserUnbanned":
-              case "PinnedMessageCreated":
-              case "PinnedMessageDeleted":
-              case "PollUpdate":
-              case "PollDelete":
-                break;
-            }
-            emitter.emit(parsedMessage.type, parsedMessage.data);
+          if (!parsedMessage) {
+            return;
           }
+
+          if (
+            parsedMessage.type === "ChatMessage" &&
+            mergedOptions.plainEmote
+          ) {
+            parsedMessage.data.content = parsedMessage.data.content.replace(
+              /\[emote:(\d+):(\w+)\]/g,
+              (_, __, emoteName) => emoteName,
+            );
+          }
+
+          emitter.emit(parsedMessage.type, parsedMessage.data);
         },
         onClose: () => {
-          if (mergedOptions.logger) {
-            console.log(`Disconnected from channel: ${channelName}`);
-          }
+          log(`Disconnected from channel: ${channelName}`);
           emitter.emit("disconnect");
         },
         onError: (error) => {
-          console.error(
-            "WebSocket error:",
-            error instanceof Error ? error.message : error,
-          );
           emitError(error);
         },
       });
     } catch (error) {
-      console.error(
-        "Error during initialization:",
-        error instanceof Error ? error.message : error,
-      );
+      if (mergedOptions.logger) {
+        console.error(
+          "Error during initialization:",
+          error instanceof Error ? error.message : error,
+        );
+      }
       throw error;
     }
   };
@@ -232,6 +255,15 @@ export const createClient = (
     listener: ClientEvents[K],
   ) => {
     emitter.on(event, listener);
+    return () => emitter.off(event, listener);
+  };
+
+  const once = <K extends keyof ClientEvents>(
+    event: K,
+    listener: ClientEvents[K],
+  ) => {
+    emitter.once(event, listener);
+    return () => emitter.off(event, listener);
   };
 
   const getUser = () =>
@@ -243,8 +275,8 @@ export const createClient = (
         }
       : null;
 
-  const vod = async (video_id: string) => {
-    videoInfo = await getVideoData(video_id);
+  const vod = async (videoId: string) => {
+    const videoInfo = await getVideoData(videoId);
 
     if (!videoInfo.livestream) {
       throw new Error("Unable to fetch livestream data");
@@ -269,80 +301,34 @@ export const createClient = (
   };
 
   const sendMessage = async (messageContent: string) => {
-    if (!channelInfo) {
-      throw new Error("Channel info not available");
-    }
+    requireSession();
+    const info = requireChannel();
 
-    if (!isLoggedIn) {
-      throw new Error("Authentication required. Please login first.");
+    if (!messageContent.trim()) {
+      throw new Error("Message content cannot be empty");
     }
 
     if (messageContent.length > 500) {
       throw new Error("Message content must be less than 500 characters");
     }
 
-    const bearerToken = clientBearerToken;
-    const xsrfToken = clientToken;
-    const cookies = clientCookies;
-
-    if (!bearerToken) {
-      throw new Error("Bearer token missing");
-    }
-    if (!xsrfToken) {
-      throw new Error("XSRF token missing");
-    }
-    if (!cookies) {
-      throw new Error("Cookies missing");
-    }
-
-    try {
-      const response = await fetch(
-        `https://kick.com/api/v2/messages/send/${channelInfo.chatroom.id}`,
-        {
-          headers: {
-            accept: "application/json",
-            "accept-language": "en-US,en;q=0.9",
-            authorization: `Bearer ${bearerToken}`,
-            "x-xsrf-token": decodeXsrfToken(xsrfToken),
-            "cache-control": "max-age=0",
-            cluster: "v2",
-            "content-type": "application/json",
-            priority: "u=1, i",
-            "sec-ch-ua": '"Not A(Brand";v="8", "Chromium";v="132"',
-            "sec-ch-ua-arch": '"arm"',
-            "sec-ch-ua-bitness": '"64"',
-            "sec-ch-ua-full-version": '"132.0.6834.111"',
-            "sec-ch-ua-full-version-list":
-              '"Not A(Brand";v="8.0.0.0", "Chromium";v="132.0.6834.111"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-model": '""',
-            "sec-ch-ua-platform": '"macOS"',
-            "sec-ch-ua-platform-version": '"15.0.1"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-origin",
-            cookie: cookies,
-            Referer: `https://kick.com/${channelInfo.slug}`,
-            "Referrer-Policy": "strict-origin-when-cross-origin",
-          },
-          body: JSON.stringify({ content: messageContent, type: "message" }),
-          method: "POST",
+    await performAuthedAction<{ success: boolean }>(
+      {
+        slug: info.slug,
+        verb: "post",
+        url: `${KICK_API_BASE}/api/v2/messages/send/${info.chatroom.id}`,
+        data: {
+          content: messageContent,
+          type: "message",
+          message_ref: Date.now().toString(),
         },
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to send message: ${response.status} ${response.statusText}`,
-        );
-      }
-    } catch (error) {
-      throw new Error(
-        `Failed to send message: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
+      },
+      {
+        fail: "send message",
+        error: "Error sending message:",
+        success: "Message sent successfully",
+      },
+    );
   };
 
   const banUser = async (
@@ -350,9 +336,7 @@ export const createClient = (
     durationInMinutes?: number,
     permanent: boolean = false,
   ) => {
-    if (!channelInfo) {
-      throw new Error("Channel info not available");
-    }
+    const info = requireChannel();
 
     if (!targetUser) {
       throw new Error("Specify a user to ban");
@@ -368,123 +352,73 @@ export const createClient = (
       }
     }
 
-    const headers = getHeaders(channelInfo.slug);
-
-    try {
-      const data = permanent
-        ? { banned_username: targetUser, permanent: true }
-        : {
-            banned_username: targetUser,
-            duration: durationInMinutes,
-            permanent: false,
-          };
-
-      await makeRequest<{ success: boolean }>(
-        "post",
-        `https://kick.com/api/v2/channels/${channelInfo.id}/bans`,
-        headers,
-        data,
-      );
-
-      if (mergedOptions.logger) {
-        console.log(
-          `User ${targetUser} ${permanent ? "banned" : "timed out"} successfully`,
-        );
-      }
-    } catch (error) {
-      if (mergedOptions.logger) {
-        console.error(
-          `Error ${permanent ? "banning" : "timing out"} user:`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-      throw new Error(
-        `Failed to ${permanent ? "ban" : "time out"} user ${targetUser}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
+    await performAuthedAction<{ success: boolean }>(
+      {
+        slug: info.slug,
+        verb: "post",
+        url: `${KICK_API_BASE}/api/v2/channels/${info.id}/bans`,
+        data: permanent
+          ? { banned_username: targetUser, permanent: true }
+          : {
+              banned_username: targetUser,
+              duration: durationInMinutes,
+              permanent: false,
+            },
+      },
+      {
+        fail: `${permanent ? "ban" : "time out"} user ${targetUser}`,
+        error: `Error ${permanent ? "banning" : "timing out"} user:`,
+        success: `User ${targetUser} ${
+          permanent ? "banned" : "timed out"
+        } successfully`,
+      },
+    );
   };
 
   const unbanUser = async (targetUser: string) => {
-    if (!channelInfo) {
-      throw new Error("Channel info not available");
-    }
+    const info = requireChannel();
 
     if (!targetUser) {
       throw new Error("Specify a user to unban");
     }
 
-    const headers = getHeaders(channelInfo.slug);
-
-    try {
-      await makeRequest<{ success: boolean }>(
-        "delete",
-        `https://kick.com/api/v2/channels/${channelInfo.id}/bans/${targetUser}`,
-        headers,
-      );
-
-      if (mergedOptions.logger) {
-        console.log(`User ${targetUser} unbanned successfully`);
-      }
-    } catch (error) {
-      if (mergedOptions.logger) {
-        console.error(
-          "Error unbanning user:",
-          error instanceof Error ? error.message : error,
-        );
-      }
-      throw new Error(
-        `Failed to unban user ${targetUser}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
+    await performAuthedAction<{ success: boolean }>(
+      {
+        slug: info.slug,
+        verb: "delete",
+        url: `${KICK_API_BASE}/api/v2/channels/${info.id}/bans/${targetUser}`,
+      },
+      {
+        fail: `unban user ${targetUser}`,
+        error: "Error unbanning user:",
+        success: `User ${targetUser} unbanned successfully`,
+      },
+    );
   };
 
   const deleteMessage = async (messageId: string) => {
-    if (!channelInfo) {
-      throw new Error("Channel info not available");
-    }
+    const info = requireChannel();
 
     if (!messageId) {
       throw new Error("Specify a messageId to delete");
     }
 
-    const headers = getHeaders(channelInfo.slug);
-
-    try {
-      await makeRequest<{ success: boolean }>(
-        "delete",
-        `https://kick.com/api/v2/channels/${channelInfo.id}/messages/${messageId}`,
-        headers,
-      );
-
-      if (mergedOptions.logger) {
-        console.log(`Message ${messageId} deleted successfully`);
-      }
-    } catch (error) {
-      if (mergedOptions.logger) {
-        console.error(
-          "Error deleting message:",
-          error instanceof Error ? error.message : error,
-        );
-      }
-      throw new Error(
-        `Failed to delete message ${messageId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
+    await performAuthedAction<{ success: boolean }>(
+      {
+        slug: info.slug,
+        verb: "delete",
+        url: `${KICK_API_BASE}/api/v2/channels/${info.id}/messages/${messageId}`,
+      },
+      {
+        fail: `delete message ${messageId}`,
+        error: "Error deleting message:",
+        success: `Message ${messageId} deleted successfully`,
+      },
+    );
   };
 
   const slowMode = async (mode: "on" | "off", durationInSeconds?: number) => {
-    if (!channelInfo) {
-      throw new Error("Channel info not available");
-    }
+    const info = requireChannel();
 
     if (mode === "on" && (!durationInSeconds || durationInSeconds < 1)) {
       throw new Error(
@@ -492,121 +426,74 @@ export const createClient = (
       );
     }
 
-    const headers = getHeaders(channelInfo.slug);
-
-    try {
-      const data =
-        mode === "off"
-          ? { slow_mode: false }
-          : { slow_mode: true, message_interval: durationInSeconds };
-
-      await makeRequest<{ success: boolean }>(
-        "put",
-        `https://kick.com/api/v2/channels/${channelInfo.slug}/chatroom`,
-        headers,
-        data,
-      );
-
-      if (mergedOptions.logger) {
-        console.log(
+    await performAuthedAction<{ success: boolean }>(
+      {
+        slug: info.slug,
+        verb: "put",
+        url: `${KICK_API_BASE}/api/v2/channels/${info.slug}/chatroom`,
+        data:
+          mode === "off"
+            ? { slow_mode: false }
+            : { slow_mode: true, message_interval: durationInSeconds },
+      },
+      {
+        fail: `${mode === "off" ? "disable" : "enable"} slow mode`,
+        error: `Error ${mode === "off" ? "disabling" : "enabling"} slow mode:`,
+        success:
           mode === "off"
             ? "Slow mode disabled successfully"
             : `Slow mode enabled with ${durationInSeconds} second interval`,
-        );
-      }
-    } catch (error) {
-      if (mergedOptions.logger) {
-        console.error(
-          `Error ${mode === "off" ? "disabling" : "enabling"} slow mode:`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-      throw new Error(
-        `Failed to ${mode === "off" ? "disable" : "enable"} slow mode: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
+      },
+    );
   };
 
-  const getPoll = async (targetChannel?: string): Promise<Poll> => {
+  const getPoll = (targetChannel?: string): Promise<Poll> => {
     const channel = targetChannel || channelName;
 
-    if (!targetChannel && !channelInfo) {
-      throw new Error("Channel info not available");
+    if (!targetChannel) {
+      requireChannel();
     }
+    requireSession();
 
-    const headers = getHeaders(channel);
-
-    try {
-      const result = await makeRequest<Poll>(
-        "get",
-        `https://kick.com/api/v2/channels/${channel}/polls`,
-        headers,
-      );
-
-      if (mergedOptions.logger) {
-        console.log(`Poll retrieved successfully for channel: ${channel}`);
-      }
-      return result;
-    } catch (error) {
-      if (mergedOptions.logger) {
-        console.error(
-          `Error retrieving poll for channel ${channel}:`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-      throw new Error(
-        `Failed to retrieve poll for channel ${channel}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
+    return performAuthedAction<Poll>(
+      {
+        slug: channel,
+        verb: "get",
+        url: `${KICK_API_BASE}/api/v2/channels/${channel}/polls`,
+      },
+      {
+        fail: `retrieve poll for channel ${channel}`,
+        error: `Error retrieving poll for channel ${channel}:`,
+        success: `Poll retrieved successfully for channel: ${channel}`,
+      },
+    );
   };
 
-  const getLeaderboards = async (
-    targetChannel?: string,
-  ): Promise<Leaderboard> => {
+  const getLeaderboards = (targetChannel?: string): Promise<Leaderboard> => {
     const channel = targetChannel || channelName;
 
-    if (!targetChannel && !channelInfo) {
-      throw new Error("Channel info not available");
+    if (!targetChannel) {
+      requireChannel();
     }
+    requireSession();
 
-    const headers = getHeaders(channel);
-
-    try {
-      const result = await makeRequest<Leaderboard>(
-        "get",
-        `https://kick.com/api/v2/channels/${channel}/leaderboards`,
-        headers,
-      );
-
-      if (mergedOptions.logger) {
-        console.log(
-          `Leaderboards retrieved successfully for channel: ${channel}`,
-        );
-      }
-      return result;
-    } catch (error) {
-      if (mergedOptions.logger) {
-        console.error(
-          `Error retrieving leaderboards for channel ${channel}:`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-      throw new Error(
-        `Failed to retrieve leaderboards for channel ${channel}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
+    return performAuthedAction<Leaderboard>(
+      {
+        slug: channel,
+        verb: "get",
+        url: `${KICK_API_BASE}/api/v2/channels/${channel}/leaderboards`,
+      },
+      {
+        fail: `retrieve leaderboards for channel ${channel}`,
+        error: `Error retrieving leaderboards for channel ${channel}:`,
+        success: `Leaderboards retrieved successfully for channel: ${channel}`,
+      },
+    );
   };
 
   const destroy = () => {
+    destroyed = true;
+    generation += 1;
     wsHandle?.close();
     wsHandle = null;
     emitter.removeAllListeners();
@@ -615,9 +502,13 @@ export const createClient = (
   return {
     login,
     on,
+    once,
     destroy,
     get user() {
       return getUser();
+    },
+    get isAuthenticated() {
+      return session !== null;
     },
     vod,
     sendMessage,

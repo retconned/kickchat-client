@@ -1,7 +1,12 @@
+export type { CookieInput, KickSession } from "./auth/session";
 export { createClient } from "./client/client";
+export {
+  DEFAULT_TIMEOUT_MS,
+  HttpStatusError,
+  isAuthExpiredError,
+} from "./core/request-helper";
 export type { Chatroom, KickChannelInfo } from "./types/channels";
 export type {
-  AuthenticationSettings,
   ClientEvents,
   ClientOptions,
   Gift,
