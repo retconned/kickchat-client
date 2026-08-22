@@ -11,81 +11,76 @@ import {
   type UserBannedEvent,
   type UserUnbannedEvent,
 } from "../types/events";
-import { parseJSON } from "../utils/utils";
 
-export type ParsedMessage =
-  | { type: "ChatMessage"; data: ChatMessage }
-  | { type: "Subscription"; data: Subscription }
-  | { type: "GiftedSubscriptions"; data: GiftedSubscriptionsEvent }
-  | { type: "StreamHost"; data: StreamHostEvent }
-  | { type: "MessageDeleted"; data: MessageDeletedEvent }
-  | { type: "UserBanned"; data: UserBannedEvent }
-  | { type: "UserUnbanned"; data: UserUnbannedEvent }
-  | { type: "PinnedMessageCreated"; data: PinnedMessageCreatedEvent }
-  | { type: "PinnedMessageDeleted"; data: MessageDeletedEvent }
-  | { type: "PollUpdate"; data: PollUpdateEvent }
-  | { type: "PollDelete"; data: PollDeleteEvent };
+/** Links each surfaced event type to its payload type; the source of truth
+ * for both {@link ParsedMessage} and the runtime parser below. */
+interface MessageDataByType {
+  ChatMessage: ChatMessage;
+  Subscription: Subscription;
+  GiftedSubscriptions: GiftedSubscriptionsEvent;
+  StreamHost: StreamHostEvent;
+  MessageDeleted: MessageDeletedEvent;
+  UserBanned: UserBannedEvent;
+  UserUnbanned: UserUnbannedEvent;
+  PinnedMessageCreated: PinnedMessageCreatedEvent;
+  PinnedMessageDeleted: MessageDeletedEvent;
+  PollUpdate: PollUpdateEvent;
+  PollDelete: PollDeleteEvent;
+}
 
-export const parseMessage = (message: string): ParsedMessage | null => {
+export type ParsedMessage = {
+  [K in keyof MessageDataByType]: { type: K; data: MessageDataByType[K] };
+}[keyof MessageDataByType];
+
+const parseJSON = <T>(json: string): T | null => {
   try {
-    const messageEventJSON = parseJSON<MessageEvent>(message);
-
-    // switch event type
-    switch (messageEventJSON.event) {
-      case "App\\Events\\ChatMessageEvent": {
-        const data = parseJSON<ChatMessage>(messageEventJSON.data);
-        return { type: "ChatMessage", data };
-      }
-      case "App\\Events\\SubscriptionEvent": {
-        const data = parseJSON<Subscription>(messageEventJSON.data);
-        return { type: "Subscription", data };
-      }
-      case "App\\Events\\GiftedSubscriptionsEvent": {
-        const data = parseJSON<GiftedSubscriptionsEvent>(messageEventJSON.data);
-        return { type: "GiftedSubscriptions", data };
-      }
-      case "App\\Events\\StreamHostEvent": {
-        const data = parseJSON<StreamHostEvent>(messageEventJSON.data);
-        return { type: "StreamHost", data };
-      }
-      case "App\\Events\\MessageDeletedEvent": {
-        const data = parseJSON<MessageDeletedEvent>(messageEventJSON.data);
-        return { type: "MessageDeleted", data };
-      }
-      case "App\\Events\\UserBannedEvent": {
-        const data = parseJSON<UserBannedEvent>(messageEventJSON.data);
-        return { type: "UserBanned", data };
-      }
-      case "App\\Events\\UserUnbannedEvent": {
-        const data = parseJSON<UserUnbannedEvent>(messageEventJSON.data);
-        return { type: "UserUnbanned", data };
-      }
-      case "App\\Events\\PinnedMessageCreatedEvent": {
-        const data = parseJSON<PinnedMessageCreatedEvent>(
-          messageEventJSON.data,
-        );
-        return { type: "PinnedMessageCreated", data };
-      }
-      case "App\\Events\\PinnedMessageDeletedEvent": {
-        const data = parseJSON<MessageDeletedEvent>(messageEventJSON.data);
-        return { type: "PinnedMessageDeleted", data };
-      }
-      case "App\\Events\\PollUpdateEvent": {
-        const data = parseJSON<PollUpdateEvent>(messageEventJSON.data);
-        return { type: "PollUpdate", data };
-      }
-      case "App\\Events\\PollDeleteEvent": {
-        const data = parseJSON<PollDeleteEvent>(messageEventJSON.data);
-        return { type: "PollDelete", data };
-      }
-
-      default: {
-        console.log("Unknown event type:", messageEventJSON.event);
-        return null;
-      }
-    }
-  } catch (error) {
-    console.error("Error parsing message:", error);
+    return JSON.parse(json) as T;
+  } catch {
     return null;
   }
+};
+
+/**
+ * Kick Pusher events we surface to consumers, mapped by their fully
+ * qualified `App\Events\…` name. Unknown events (including all Pusher
+ * control traffic) are intentionally ignored — they are routine, not
+ * errors worth logging. The table guarantees the event name ↔ message
+ * type correlation that the final cast in {@link parseMessage} relies on.
+ */
+const EVENT_NAME_TO_TYPE: Record<string, keyof MessageDataByType> = {
+  "App\\Events\\ChatMessageEvent": "ChatMessage",
+  "App\\Events\\SubscriptionEvent": "Subscription",
+  "App\\Events\\GiftedSubscriptionsEvent": "GiftedSubscriptions",
+  "App\\Events\\StreamHostEvent": "StreamHost",
+  "App\\Events\\MessageDeletedEvent": "MessageDeleted",
+  "App\\Events\\UserBannedEvent": "UserBanned",
+  "App\\Events\\UserUnbannedEvent": "UserUnbanned",
+  "App\\Events\\PinnedMessageCreatedEvent": "PinnedMessageCreated",
+  "App\\Events\\PinnedMessageDeletedEvent": "PinnedMessageDeleted",
+  "App\\Events\\PollUpdateEvent": "PollUpdate",
+  "App\\Events\\PollDeleteEvent": "PollDelete",
+};
+
+/** Parses one raw Pusher frame into a typed message, or `null` for frames
+ * this library does not surface (control frames, unknown/invalid events). */
+export const parseMessage = (message: string): ParsedMessage | null => {
+  const event = parseJSON<MessageEvent>(message);
+
+  if (
+    !event ||
+    typeof event.event !== "string" ||
+    typeof event.data !== "string"
+  ) {
+    return null;
+  }
+
+  const type = EVENT_NAME_TO_TYPE[event.event];
+  if (!type) {
+    return null;
+  }
+
+  const data: MessageDataByType[typeof type] | null = parseJSON(event.data);
+
+  // Safe: EVENT_NAME_TO_TYPE ties `type` to the payload type we parsed.
+  return data ? ({ type, data } as unknown as ParsedMessage) : null;
 };

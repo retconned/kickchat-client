@@ -1,3 +1,4 @@
+import { type CookieInput } from "../auth/session";
 import {
   type GiftedSubscriptionsEvent,
   type MessageData,
@@ -16,6 +17,7 @@ export interface ClientOptions {
   plainEmote?: boolean;
   logger?: boolean;
   readOnly?: boolean;
+  timeoutMs?: number;
 }
 
 export interface Video {
@@ -54,6 +56,7 @@ export interface ClientEvents {
   PinnedMessageDeleted: (data: MessageDeletedEvent) => void;
   PollUpdate: (data: PollUpdateEvent) => void;
   PollDelete: (data: PollDeleteEvent) => void;
+  authExpired: () => void;
   disconnect: () => void;
   error: (error: unknown) => void;
 }
@@ -63,10 +66,15 @@ export interface KickClient {
   on: <K extends keyof ClientEvents>(
     event: K,
     listener: ClientEvents[K],
-  ) => void;
+  ) => () => void;
+  once: <K extends keyof ClientEvents>(
+    event: K,
+    listener: ClientEvents[K],
+  ) => () => void;
   vod: (video_id: string) => Promise<Video>;
-  login: (credentials: LoginOptions) => Promise<boolean>;
+  login: (credentials: LoginOptions) => Promise<void>;
   user: KickClientUser | null;
+  isAuthenticated: boolean;
   sendMessage: (messageContent: string) => Promise<void>;
   banUser: (
     targetUser: string,
@@ -80,26 +88,10 @@ export interface KickClient {
   getLeaderboards: (targetChannel?: string) => Promise<Leaderboard>;
 }
 
-export interface AuthenticationSettings {
-  username: string;
-  password: string;
-  otp_secret?: string;
-}
-
-type LoginCredentials = {
-  username: string;
-  password: string;
-  otp_secret?: string;
-};
-
-type TokenCredentials = {
-  bearerToken: string;
-  xsrfToken: string;
-  cookies: string;
-};
 export type LoginOptions =
-  | { type: "login"; credentials: LoginCredentials }
-  | { type: "tokens"; credentials: TokenCredentials };
+  | { accessToken: string; cookies?: CookieInput }
+  | { cookies: CookieInput }
+  | { bag: Record<string, string> };
 
 export interface PollData {
   title: string;

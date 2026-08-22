@@ -1,242 +1,86 @@
-import { authenticator } from "otplib";
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import axios from "axios";
 import { type KickChannelInfo } from "../types/channels";
-import { type AuthenticationSettings } from "../types/client";
 import { type VideoInfo } from "../types/video";
+import { DEFAULT_TIMEOUT_MS } from "./request-helper";
 
-puppeteer.use(StealthPlugin());
+export const KICK_API_BASE = "https://kick.com";
 
-const setupPuppeteer = async () => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    defaultViewport: null,
-  });
+const BROWSER_HEADERS: Record<string, string> = {
+  accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9",
+  "cache-control": "max-age=0",
+  referer: "https://kick.com/",
+  "sec-ch-ua": '"Not A(Brand";v="8", "Chromium";v="132"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"macOS"',
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "same-origin",
+  "user-agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+};
+
+const CLOUDFLARE_MESSAGE =
+  "Request blocked by Cloudflare protection. Please try again later.";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const fetchJson = async <T>(
+  url: string,
+  label: string,
+  isValidShape?: (data: Record<string, unknown>) => boolean,
+): Promise<T> => {
+  let status = 0;
+  let data: unknown;
+
   try {
-    const page = await browser.newPage();
-    return { browser, page };
+    const response = await axios.get<unknown>(url, {
+      headers: BROWSER_HEADERS,
+      timeout: DEFAULT_TIMEOUT_MS,
+      validateStatus: () => true,
+    });
+    status = response.status;
+    data = response.data;
   } catch (error) {
-    await browser.close();
-    throw error;
+    throw new Error(
+      `Failed to fetch ${label}: ${
+        axios.isAxiosError(error) ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
   }
+
+  if (status === 403) {
+    throw new Error(CLOUDFLARE_MESSAGE);
+  }
+
+  if (status < 200 || status >= 300) {
+    throw new Error(`Failed to fetch ${label}: received status ${status}`);
+  }
+
+  if (!isRecord(data) || (isValidShape !== undefined && !isValidShape(data))) {
+    throw new Error(
+      `Unexpected ${label} response shape${status === 200 ? "; Kick may have served a challenge page" : ""}`,
+    );
+  }
+
+  return data as T;
 };
 
 export const getChannelData = async (
   channel: string,
-): Promise<KickChannelInfo> => {
-  const { browser, page } = await setupPuppeteer();
+): Promise<KickChannelInfo> =>
+  fetchJson<KickChannelInfo>(
+    `${KICK_API_BASE}/api/v2/channels/${channel}`,
+    "channel data",
+    (data) => isRecord(data.chatroom) && typeof data.chatroom.id === "number",
+  );
 
-  try {
-    const response = await page.goto(
-      `https://kick.com/api/v2/channels/${channel}`,
-    );
-
-    if (response?.status() === 403) {
-      throw new Error(
-        "Request blocked by Cloudflare protection. Please try again later.",
-      );
-    }
-
-    await page.waitForSelector("body");
-
-    const jsonContent: KickChannelInfo = await page.evaluate(() => {
-      const bodyElement = document.querySelector("body");
-      if (!bodyElement?.textContent) {
-        throw new Error("Unable to fetch channel data");
-      }
-      return JSON.parse(bodyElement.textContent);
-    });
-
-    return jsonContent;
-  } catch (error) {
-    throw new Error(
-      `Failed to fetch channel data: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-      { cause: error },
-    );
-  } finally {
-    await browser.close();
-  }
-};
-
-export const getVideoData = async (video_id: string): Promise<VideoInfo> => {
-  const { browser, page } = await setupPuppeteer();
-
-  try {
-    const response = await page.goto(
-      `https://kick.com/api/v1/video/${video_id}`,
-    );
-
-    if (response?.status() === 403) {
-      throw new Error(
-        "Request blocked by Cloudflare protection. Please try again later.",
-      );
-    }
-
-    await page.waitForSelector("body");
-
-    const jsonContent: VideoInfo = await page.evaluate(() => {
-      const bodyElement = document.querySelector("body");
-      if (!bodyElement?.textContent) {
-        throw new Error("Unable to fetch video data");
-      }
-      return JSON.parse(bodyElement.textContent);
-    });
-
-    return jsonContent;
-  } catch (error) {
-    throw new Error(
-      `Failed to fetch video data: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-      { cause: error },
-    );
-  } finally {
-    await browser.close();
-  }
-};
-
-export const authentication = async ({
-  username,
-  password,
-  otp_secret,
-}: AuthenticationSettings): Promise<{
-  bearerToken: string;
-  xsrfToken: string;
-  cookies: string;
-  isAuthenticated: boolean;
-}> => {
-  let bearerToken = "";
-  let xsrfToken = "";
-  let cookieString = "";
-  let isAuthenticated = false;
-
-  const browser = await puppeteer.launch({
-    headless: true,
-    defaultViewport: null,
-  });
-
-  const selectorTimeout = 6000;
-
-  try {
-    const page = await browser.newPage();
-    // Enable request interception
-    await page.setRequestInterception(true);
-
-    // Monitor all requests
-    page.on("request", (request) => {
-      const url = request.url();
-      const headers = request.headers();
-
-      if (url.includes("/api/v2/channels/followed")) {
-        const reqBearerToken = headers.authorization || "";
-        cookieString = headers.cookie || "";
-
-        if (!bearerToken && reqBearerToken.includes("Bearer ")) {
-          const splitToken = reqBearerToken.split("Bearer ")[1];
-          if (splitToken) {
-            bearerToken = splitToken;
-          }
-        }
-      }
-
-      request.continue();
-    });
-
-    await page.goto("https://kick.com/");
-    await page.waitForSelector("nav > div:nth-child(3) > button:first-child", {
-      visible: true,
-      timeout: selectorTimeout,
-    });
-    await page.click("nav > div:nth-child(3) > button:first-child");
-
-    await page.waitForSelector('input[name="emailOrUsername"]', {
-      visible: true,
-      timeout: selectorTimeout,
-    });
-
-    await page.type('input[name="emailOrUsername"]', username, { delay: 100 });
-    await page.type('input[name="password"]', password, { delay: 100 });
-    await page.click('button[data-test="login-submit"]');
-
-    let requires2FA = false;
-
-    try {
-      await page.waitForFunction(
-        () => {
-          const element = document.querySelector(
-            'input[data-input-otp="true"]',
-          );
-          const verifyText =
-            document.body.textContent?.includes("Verify 2FA Code");
-          return element || !verifyText;
-        },
-        { timeout: selectorTimeout },
-      );
-    } catch (error) {
-      if (!(error instanceof Error && error.name === "TimeoutError")) {
-        throw error;
-      }
-    }
-
-    requires2FA = await page.evaluate(() => {
-      return !!document.querySelector('input[data-input-otp="true"]');
-    });
-
-    if (requires2FA) {
-      if (!otp_secret) {
-        throw new Error("2FA authentication required");
-      }
-
-      const token = authenticator.generate(otp_secret);
-      await page.waitForSelector('input[data-input-otp="true"]');
-      await page.type('input[data-input-otp="true"]', token, { delay: 100 });
-      await page.click('button[type="submit"]');
-      await page.waitForNavigation({ waitUntil: "networkidle0" });
-    }
-
-    const followedResponse = await page.goto(
-      "https://kick.com/api/v2/channels/followed",
-    );
-
-    if (followedResponse?.status() !== 200) {
-      throw new Error(
-        `Failed to verify authentication, received status ${followedResponse?.status() ?? "unknown"}`,
-      );
-    }
-
-    const cookies = await page.cookies();
-    cookieString = cookies
-      .map((cookie) => `${cookie.name}=${cookie.value}`)
-      .join("; ");
-
-    const xsrfTokenCookie = cookies.find(
-      (cookie) => cookie.name === "XSRF-TOKEN",
-    )?.value;
-    if (xsrfTokenCookie) {
-      xsrfToken = xsrfTokenCookie;
-    }
-
-    if (!cookieString || cookieString === "") {
-      throw new Error("Failed to capture cookies");
-    }
-    if (!bearerToken || bearerToken === "") {
-      throw new Error("Failed to capture bearer token");
-    }
-    if (!xsrfToken || xsrfToken === "") {
-      throw new Error("Failed to capture xsrf token");
-    }
-
-    isAuthenticated = true;
-
-    return {
-      bearerToken,
-      xsrfToken,
-      cookies: cookieString,
-      isAuthenticated,
-    };
-  } finally {
-    await browser.close();
-  }
-};
+export const getVideoData = async (videoId: string): Promise<VideoInfo> =>
+  fetchJson<VideoInfo>(
+    `${KICK_API_BASE}/api/v1/video/${videoId}`,
+    "video data",
+    (data) => "id" in data || "uuid" in data,
+  );
