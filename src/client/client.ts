@@ -1,6 +1,15 @@
 import EventEmitter from "node:events";
 import { buildSession, type KickSession } from "../auth/session";
-import { getChannelData, getVideoData, KICK_API_BASE } from "../core/kick-api";
+import { getChannelClips } from "../core/clips";
+import {
+  getChannelData,
+  getChannelLinks,
+  getChannelVideos,
+  getChatroomRules,
+  getFollowersCount,
+  getVideoData,
+  KICK_API_BASE,
+} from "../core/kick-api";
 import { parseMessage } from "../core/message-handling";
 import {
   createRequestContext,
@@ -10,7 +19,11 @@ import {
   type RequestContext,
 } from "../core/request-helper";
 import { createReconnectingWebSocket } from "../core/websocket";
-import { type KickChannelInfo } from "../types/channels";
+import {
+  type ChannelLink,
+  type ChannelVideo,
+  type KickChannelInfo,
+} from "../types/channels";
 import {
   type ClientEvents,
   type ClientOptions,
@@ -19,6 +32,7 @@ import {
   type LoginOptions,
   type Poll,
 } from "../types/client";
+import { type ClipFeed } from "../types/clips";
 
 export const createClient = (
   channelName: string,
@@ -203,6 +217,7 @@ export const createClient = (
       log("Channel data received, establishing WebSocket connection...");
 
       wsHandle = createReconnectingWebSocket(channelInfo.chatroom.id, {
+        channelId: channelInfo.id,
         onOpen: () => {
           log(`Connected to channel: ${channelName}`);
           emitter.emit("ready", getUser());
@@ -491,6 +506,44 @@ export const createClient = (
     );
   };
 
+  const resolveTargetChannel = (targetChannel?: string): string => {
+    const channel = targetChannel || channelName;
+
+    if (!targetChannel) {
+      requireChannel();
+    }
+
+    return channel;
+  };
+
+  const getFollowers = (targetChannel?: string): Promise<number> => {
+    assertUsable();
+    return getFollowersCount(resolveTargetChannel(targetChannel));
+  };
+
+  const getRules = (targetChannel?: string): Promise<string> => {
+    assertUsable();
+    return getChatroomRules(resolveTargetChannel(targetChannel));
+  };
+
+  const getLinks = (targetChannel?: string): Promise<ChannelLink[]> => {
+    assertUsable();
+    return getChannelLinks(resolveTargetChannel(targetChannel));
+  };
+
+  const getVideos = (targetChannel?: string): Promise<ChannelVideo[]> => {
+    assertUsable();
+    return getChannelVideos(resolveTargetChannel(targetChannel));
+  };
+
+  const getClientClips = (
+    targetChannel?: string,
+    cursor?: string,
+  ): Promise<ClipFeed> => {
+    assertUsable();
+    return getChannelClips(resolveTargetChannel(targetChannel), cursor);
+  };
+
   const destroy = () => {
     destroyed = true;
     generation += 1;
@@ -518,5 +571,10 @@ export const createClient = (
     slowMode,
     getPoll,
     getLeaderboards,
+    getFollowers,
+    getRules,
+    getLinks,
+    getVideos,
+    getClips: getClientClips,
   };
 };

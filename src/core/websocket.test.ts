@@ -99,6 +99,24 @@ describe("createReconnectingWebSocket", () => {
     handle.close();
   });
 
+  it("also subscribes to the channel feed when a channelId is given", async () => {
+    const received: string[] = [];
+    const server = await startServer((socket) => {
+      socket.on("message", (data) => received.push(data.toString()));
+    });
+
+    const handle = createReconnectingWebSocket(51082, {
+      baseUrl: `ws://127.0.0.1:${server.port}`,
+      channelId: 1234,
+    });
+
+    await waitFor(() => received.length >= 2);
+    expect(received[0]).toContain('"chatrooms.51082.v2"');
+    expect(received[1]).toContain('"channel.1234"');
+
+    handle.close();
+  });
+
   it("forwards chat frames and answers pings with pongs", async () => {
     let client: ServerSocket | undefined;
     const pongs: string[] = [];

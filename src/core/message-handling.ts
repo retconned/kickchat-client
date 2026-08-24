@@ -1,11 +1,17 @@
 import {
   type ChatMessage,
+  type FollowersUpdatedEvent,
   type GiftedSubscriptionsEvent,
+  type GiftsLeaderboardUpdatedEvent,
+  type KicksGiftedEvent,
   type MessageDeletedEvent,
   type MessageEvent,
   type PinnedMessageCreatedEvent,
   type PollDeleteEvent,
   type PollUpdateEvent,
+  type RewardRedeemedEvent,
+  type StopStreamBroadcastEvent,
+  type StreamerIsLiveEvent,
   type StreamHostEvent,
   type Subscription,
   type UserBannedEvent,
@@ -26,6 +32,12 @@ interface MessageDataByType {
   PinnedMessageDeleted: MessageDeletedEvent;
   PollUpdate: PollUpdateEvent;
   PollDelete: PollDeleteEvent;
+  FollowersUpdated: FollowersUpdatedEvent;
+  StreamerIsLive: StreamerIsLiveEvent;
+  StopStreamBroadcast: StopStreamBroadcastEvent;
+  KicksGifted: KicksGiftedEvent;
+  GiftsLeaderboardUpdated: GiftsLeaderboardUpdatedEvent;
+  RewardRedeemed: RewardRedeemedEvent;
 }
 
 export type ParsedMessage = {
@@ -59,6 +71,12 @@ const EVENT_NAME_TO_TYPE: Record<string, keyof MessageDataByType> = {
   "App\\Events\\PinnedMessageDeletedEvent": "PinnedMessageDeleted",
   "App\\Events\\PollUpdateEvent": "PollUpdate",
   "App\\Events\\PollDeleteEvent": "PollDelete",
+  "App\\Events\\FollowersUpdated": "FollowersUpdated",
+  "App\\Events\\StreamerIsLive": "StreamerIsLive",
+  "App\\Events\\StopStreamBroadcast": "StopStreamBroadcast",
+  KicksGifted: "KicksGifted",
+  "App\\Events\\GiftsLeaderboardUpdated": "GiftsLeaderboardUpdated",
+  RewardRedeemedEvent: "RewardRedeemed",
 };
 
 /** Parses one raw Pusher frame into a typed message, or `null` for frames

@@ -96,3 +96,74 @@ export interface User {
   facebook: string;
   profile_pic: string;
 }
+
+export interface ChannelLink {
+  id: number;
+  channel_id: number;
+  description: string | null;
+  link: string;
+  created_at: string | null;
+  updated_at: string | null;
+  order: number;
+  title: string | null;
+  image?: LinkImage | null;
+}
+
+export interface LinkImage {
+  url: string;
+}
+
+export interface ChannelVideoThumbnail {
+  src: string;
+  srcset: string;
+}
+
+export interface ChannelVideoBanner {
+  responsive: string;
+  url: string;
+}
+
+export interface ChannelVideoCategory {
+  id: number;
+  category_id: number;
+  name: string;
+  slug: string;
+  tags: string[];
+  description: string | null;
+  deleted_at: string | null;
+  viewers: number;
+  is_mature: boolean;
+  banner: ChannelVideoBanner | null;
+}
+
+export interface ChannelVideoDetails {
+  id: number;
+  uuid: string;
+  views: number;
+  live_stream_id: number;
+  slug: string | null;
+  trading_platform_id: string | null;
+  created_at: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+}
+
+export interface ChannelVideo {
+  id: number;
+  slug: string | null;
+  channel_id: number;
+  created_at: string;
+  session_title: string | null;
+  is_live: boolean;
+  start_time: string;
+  source: string | null;
+  twitch_channel: string | null;
+  duration: number;
+  language: string | null;
+  is_mature: boolean;
+  viewer_count: number;
+  thumbnail: ChannelVideoThumbnail;
+  views: number;
+  video: ChannelVideoDetails;
+  categories: ChannelVideoCategory[];
+}

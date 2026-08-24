@@ -1,11 +1,19 @@
 import { type CookieInput } from "../auth/session";
+import { type ChannelLink, type ChannelVideo } from "./channels";
+import { type ClipFeed } from "./clips";
 import {
+  type FollowersUpdatedEvent,
   type GiftedSubscriptionsEvent,
+  type GiftsLeaderboardUpdatedEvent,
+  type KicksGiftedEvent,
   type MessageData,
   type MessageDeletedEvent,
   type PinnedMessageCreatedEvent,
   type PollDeleteEvent,
   type PollUpdateEvent,
+  type RewardRedeemedEvent,
+  type StopStreamBroadcastEvent,
+  type StreamerIsLiveEvent,
   type StreamHostEvent,
   type Subscription,
   type UserBannedEvent,
@@ -56,6 +64,12 @@ export interface ClientEvents {
   PinnedMessageDeleted: (data: MessageDeletedEvent) => void;
   PollUpdate: (data: PollUpdateEvent) => void;
   PollDelete: (data: PollDeleteEvent) => void;
+  FollowersUpdated: (data: FollowersUpdatedEvent) => void;
+  StreamerIsLive: (data: StreamerIsLiveEvent) => void;
+  StopStreamBroadcast: (data: StopStreamBroadcastEvent) => void;
+  KicksGifted: (data: KicksGiftedEvent) => void;
+  GiftsLeaderboardUpdated: (data: GiftsLeaderboardUpdatedEvent) => void;
+  RewardRedeemed: (data: RewardRedeemedEvent) => void;
   authExpired: () => void;
   disconnect: () => void;
   error: (error: unknown) => void;
@@ -86,6 +100,11 @@ export interface KickClient {
   slowMode: (mode: "on" | "off", durationInSeconds?: number) => Promise<void>;
   getPoll: (targetChannel?: string) => Promise<Poll>;
   getLeaderboards: (targetChannel?: string) => Promise<Leaderboard>;
+  getFollowers: (targetChannel?: string) => Promise<number>;
+  getRules: (targetChannel?: string) => Promise<string>;
+  getLinks: (targetChannel?: string) => Promise<ChannelLink[]>;
+  getVideos: (targetChannel?: string) => Promise<ChannelVideo[]>;
+  getClips: (targetChannel?: string, cursor?: string) => Promise<ClipFeed>;
 }
 
 export type LoginOptions =

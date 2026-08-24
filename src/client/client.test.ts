@@ -15,7 +15,10 @@ vi.mock("axios", async (importOriginal) => {
   const actual = await importOriginal<typeof import("axios")>();
   return {
     ...actual,
-    default: Object.assign(axiosCall, actual.default),
+    default: Object.assign(axiosCall, actual.default, {
+      // fetchJson-style helpers go through axios.get(url, config).
+      get: axiosCall,
+    }),
   };
 });
 
@@ -292,6 +295,46 @@ describe("authenticated actions", () => {
     const client = await loggedIn();
     await expect(client.vod("u-1")).rejects.toThrow(
       /Unable to fetch livestream data/,
+    );
+  });
+
+  it("fetches followers count, rules, links, videos, and clips", async () => {
+    const client = await loggedIn();
+
+    axiosCall.mockResolvedValueOnce({
+      status: 200,
+      data: { data: { count: 99 } },
+    });
+    expect(await client.getFollowers()).toBe(99);
+    expect(axiosCall.mock.calls[0]?.[0]).toBe(
+      "https://kick.com/api/v1/channels/xqc/followers-count",
+    );
+
+    axiosCall.mockResolvedValueOnce({
+      status: 200,
+      data: { data: { rules: "Be kind" } },
+    });
+    expect(await client.getRules()).toBe("Be kind");
+
+    axiosCall.mockResolvedValueOnce({ status: 200, data: [{ id: 3 }] });
+    expect(await client.getLinks()).toEqual([{ id: 3 }]);
+
+    axiosCall.mockResolvedValueOnce({ status: 200, data: [{ id: 8 }] });
+    expect(await client.getVideos("xqc")).toEqual([{ id: 8 }]);
+    expect(axiosCall.mock.calls[3]?.[0]).toBe(
+      "https://kick.com/api/v2/channels/xqc/videos",
+    );
+
+    const clip = { id: "c1" };
+    axiosCall.mockResolvedValueOnce({
+      status: 200,
+      data: { clips: [clip], next_cursor: "n1" },
+    });
+    const feed = await client.getClips();
+    expect(feed.clips).toEqual([clip]);
+    expect(feed.next_cursor).toBe("n1");
+    expect(axiosCall.mock.calls[4]?.[0]).toBe(
+      "https://kick.com/api/v2/channels/xqc/clips",
     );
   });
 });

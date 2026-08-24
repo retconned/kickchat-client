@@ -13,6 +13,9 @@ export interface ReconnectingSocketOptions {
   appKey?: string;
   baseUrl?: string;
   inactivityTimeoutMs?: number;
+  /** Numeric Kick channel ID; subscribes to `channel.{id}` for
+   * channel-level events (follows, stream status, kicks, leaderboards). */
+  channelId?: number;
 }
 
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 90000;
@@ -38,15 +41,23 @@ export const createWebSocket = (
   chatroomId: number,
   appKey: string = DEFAULT_APP_KEY,
   baseUrl: string = DEFAULT_BASE_URL,
+  channelId: number | null = null,
 ): WebSocket => {
   const socket = new WebSocket(createSocketUrl(appKey, baseUrl));
 
   socket.on("open", () => {
-    const connect = JSON.stringify({
-      event: "pusher:subscribe",
-      data: { auth: "", channel: `chatrooms.${chatroomId}.v2` },
-    });
-    socket.send(connect);
+    const channels = [`chatrooms.${chatroomId}.v2`];
+    if (channelId !== null) {
+      channels.push(`channel.${channelId}`);
+    }
+
+    for (const channel of channels) {
+      const connect = JSON.stringify({
+        event: "pusher:subscribe",
+        data: { auth: "", channel },
+      });
+      socket.send(connect);
+    }
   });
 
   return socket;
@@ -58,6 +69,7 @@ export const createReconnectingWebSocket = (
 ) => {
   const appKey = options.appKey ?? DEFAULT_APP_KEY;
   const baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
+  const channelId = options.channelId ?? null;
   const inactivityTimeoutMs =
     options.inactivityTimeoutMs ?? DEFAULT_INACTIVITY_TIMEOUT_MS;
 
@@ -132,7 +144,7 @@ export const createReconnectingWebSocket = (
 
     lastActivityAt = Date.now();
 
-    socket = createWebSocket(chatroomId, appKey, baseUrl);
+    socket = createWebSocket(chatroomId, appKey, baseUrl, channelId);
 
     socket.on("open", () => {
       lastActivityAt = Date.now();

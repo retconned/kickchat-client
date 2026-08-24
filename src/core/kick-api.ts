@@ -1,11 +1,15 @@
 import axios from "axios";
-import { type KickChannelInfo } from "../types/channels";
+import {
+  type ChannelLink,
+  type ChannelVideo,
+  type KickChannelInfo,
+} from "../types/channels";
 import { type VideoInfo } from "../types/video";
 import { DEFAULT_TIMEOUT_MS } from "./request-helper";
 
 export const KICK_API_BASE = "https://kick.com";
 
-const BROWSER_HEADERS: Record<string, string> = {
+export const BROWSER_HEADERS: Record<string, string> = {
   accept:
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
   "accept-language": "en-US,en;q=0.9",
@@ -27,16 +31,28 @@ const CLOUDFLARE_MESSAGE =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const fetchJson = async <T>(
+export type ShapeValidator = (data: unknown) => boolean;
+
+const appendQuery = (url: string, query?: Record<string, string>): string => {
+  if (!query) {
+    return url;
+  }
+
+  const params = new URLSearchParams(query).toString();
+  return params ? `${url}?${params}` : url;
+};
+
+export const fetchJson = async <T>(
   url: string,
   label: string,
-  isValidShape?: (data: Record<string, unknown>) => boolean,
+  isValidShape?: ShapeValidator,
+  query?: Record<string, string>,
 ): Promise<T> => {
   let status = 0;
   let data: unknown;
 
   try {
-    const response = await axios.get<unknown>(url, {
+    const response = await axios.get<unknown>(appendQuery(url, query), {
       headers: BROWSER_HEADERS,
       timeout: DEFAULT_TIMEOUT_MS,
       validateStatus: () => true,
@@ -60,7 +76,11 @@ const fetchJson = async <T>(
     throw new Error(`Failed to fetch ${label}: received status ${status}`);
   }
 
-  if (!isRecord(data) || (isValidShape !== undefined && !isValidShape(data))) {
+  const validate: ShapeValidator =
+    isValidShape ??
+    ((value): value is Record<string, unknown> => isRecord(value));
+
+  if (!validate(data)) {
     throw new Error(
       `Unexpected ${label} response shape${status === 200 ? "; Kick may have served a challenge page" : ""}`,
     );
@@ -69,18 +89,68 @@ const fetchJson = async <T>(
   return data as T;
 };
 
+export const fetchJsonArray = async <T>(
+  url: string,
+  label: string,
+): Promise<T[]> => fetchJson<T[]>(url, label, (data) => Array.isArray(data));
+
 export const getChannelData = async (
   channel: string,
 ): Promise<KickChannelInfo> =>
   fetchJson<KickChannelInfo>(
     `${KICK_API_BASE}/api/v2/channels/${channel}`,
     "channel data",
-    (data) => isRecord(data.chatroom) && typeof data.chatroom.id === "number",
+    (value) =>
+      isRecord(value) &&
+      isRecord(value.chatroom) &&
+      typeof value.chatroom.id === "number",
   );
 
 export const getVideoData = async (videoId: string): Promise<VideoInfo> =>
   fetchJson<VideoInfo>(
     `${KICK_API_BASE}/api/v1/video/${videoId}`,
     "video data",
-    (data) => "id" in data || "uuid" in data,
+    (value) => isRecord(value) && ("id" in value || "uuid" in value),
+  );
+
+export const getFollowersCount = async (channel: string): Promise<number> => {
+  const data = await fetchJson<{ data: { count: number } }>(
+    `${KICK_API_BASE}/api/v1/channels/${encodeURIComponent(channel)}/followers-count`,
+    "followers count",
+    (value): value is { data: { count: number } } =>
+      isRecord(value) &&
+      isRecord(value.data) &&
+      typeof value.data.count === "number",
+  );
+
+  return data.data.count;
+};
+
+export const getChatroomRules = async (channel: string): Promise<string> => {
+  const data = await fetchJson<{ data: { rules: string } }>(
+    `${KICK_API_BASE}/api/v2/channels/${encodeURIComponent(channel)}/chatroom/rules`,
+    "chatroom rules",
+    (value): value is { data: { rules: string } } =>
+      isRecord(value) &&
+      isRecord(value.data) &&
+      typeof value.data.rules === "string",
+  );
+
+  return data.data.rules;
+};
+
+export const getChannelLinks = async (
+  channel: string,
+): Promise<ChannelLink[]> =>
+  fetchJsonArray<ChannelLink>(
+    `${KICK_API_BASE}/api/v1/channels/${encodeURIComponent(channel)}/links`,
+    "channel links",
+  );
+
+export const getChannelVideos = async (
+  channel: string,
+): Promise<ChannelVideo[]> =>
+  fetchJsonArray<ChannelVideo>(
+    `${KICK_API_BASE}/api/v2/channels/${encodeURIComponent(channel)}/videos`,
+    "channel videos",
   );

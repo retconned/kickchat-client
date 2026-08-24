@@ -141,3 +141,81 @@ export interface PinnedMessageCreatedEvent {
   };
   duration: number;
 }
+
+export interface FollowersUpdatedEvent {
+  followers_count: number;
+  channel_id: number;
+  username: string;
+  followed: boolean;
+  created_at: number;
+}
+
+export interface StreamerIsLiveEvent {
+  livestream: {
+    id: number;
+    channel_id: number;
+    session_title?: string | null;
+    created_at: string;
+  };
+}
+
+export interface StopStreamBroadcastEvent {
+  livestream: {
+    id: number;
+    channel: {
+      id: number;
+      is_banned: boolean;
+    };
+  };
+}
+
+export interface KicksGiftedEvent {
+  message: string;
+  sender: {
+    id: number;
+    username: string;
+    slug: string;
+    identity: { color: string; badges: unknown };
+  };
+  gift: {
+    gift_id: string;
+    name: string;
+    amount: number;
+    type: string;
+    tier: string;
+    character_limit: number;
+    pinned_time: number;
+  };
+}
+
+export interface GiftsLeaderboardEntry {
+  user_id: number;
+  username: string;
+  quantity: number;
+}
+
+export interface GiftsLeaderboardUpdatedEvent {
+  channel: {
+    id: number;
+    slug: string;
+    user_id: number;
+    playback_url: string;
+    vod_enabled: boolean;
+    subscription_enabled: boolean;
+  };
+  gifter_username: string;
+  gifter_id: number;
+  gifted_quantity: number;
+  leaderboard: GiftsLeaderboardEntry[];
+  weekly_leaderboard: GiftsLeaderboardEntry[];
+  monthly_leaderboard: GiftsLeaderboardEntry[];
+}
+
+export interface RewardRedeemedEvent {
+  reward_title: string;
+  user_id: number;
+  channel_id: number;
+  username: string;
+  user_input?: string | null;
+  reward_background_color: string;
+}

@@ -45,9 +45,52 @@ describe("parseMessage", () => {
     ["PinnedMessageDeletedEvent", "PinnedMessageDeleted"],
     ["PollUpdateEvent", "PollUpdate"],
     ["PollDeleteEvent", "PollDelete"],
-  ])("maps %s to %s", (kickEvent, expectedType) => {
+    ["FollowersUpdated", "FollowersUpdated"],
+    ["StreamerIsLive", "StreamerIsLive"],
+    ["StopStreamBroadcast", "StopStreamBroadcast"],
+    ["GiftsLeaderboardUpdated", "GiftsLeaderboardUpdated"],
+  ])("maps App\\Events\\%s to %s", (kickEvent, expectedType) => {
     const parsed = parseMessage(frame(`App\\Events\\${kickEvent}`, {}));
     expect(parsed?.type).toBe(expectedType);
+  });
+
+  it.each([
+    ["KicksGifted", "KicksGifted"],
+    ["RewardRedeemedEvent", "RewardRedeemed"],
+  ])("maps the unprefixed event %s to %s", (kickEvent, expectedType) => {
+    const parsed = parseMessage(frame(kickEvent, {}));
+    expect(parsed?.type).toBe(expectedType);
+  });
+
+  it("parses a FollowersUpdated payload", () => {
+    const payload = {
+      followers_count: 1200,
+      channel_id: 42,
+      username: "alice",
+      followed: true,
+      created_at: 1735689600,
+    };
+
+    const parsed = parseMessage(
+      frame("App\\Events\\FollowersUpdated", payload),
+    );
+
+    expect(parsed).toEqual({ type: "FollowersUpdated", data: payload });
+  });
+
+  it("parses a RewardRedeemed payload", () => {
+    const payload = {
+      reward_title: "Hydrate reminder",
+      user_id: 7,
+      channel_id: 42,
+      username: "alice",
+      user_input: null,
+      reward_background_color: "#4d55cc",
+    };
+
+    const parsed = parseMessage(frame("RewardRedeemedEvent", payload));
+
+    expect(parsed).toEqual({ type: "RewardRedeemed", data: payload });
   });
 
   it("returns null for Pusher control frames", () => {
