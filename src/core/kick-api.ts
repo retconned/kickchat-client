@@ -42,6 +42,19 @@ const appendQuery = (url: string, query?: Record<string, string>): string => {
   return params ? `${url}?${params}` : url;
 };
 
+/** Kick channel slugs and video ids are restricted to these characters;
+ * anything else would corrupt the request path. */
+const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+export const assertIdentifier = (value: string, label: string): string => {
+  if (!IDENTIFIER_PATTERN.test(value)) {
+    throw new Error(
+      `${label} may only contain letters, digits, hyphens and underscores`,
+    );
+  }
+  return value;
+};
+
 export const fetchJson = async <T>(
   url: string,
   label: string,
@@ -96,8 +109,10 @@ export const fetchJsonArray = async <T>(
 
 export const getChannelData = async (
   channel: string,
-): Promise<KickChannelInfo> =>
-  fetchJson<KickChannelInfo>(
+): Promise<KickChannelInfo> => {
+  assertIdentifier(channel, "Channel name");
+
+  return await fetchJson<KickChannelInfo>(
     `${KICK_API_BASE}/api/v2/channels/${channel}`,
     "channel data",
     (value) =>
@@ -105,15 +120,21 @@ export const getChannelData = async (
       isRecord(value.chatroom) &&
       typeof value.chatroom.id === "number",
   );
+};
 
-export const getVideoData = async (videoId: string): Promise<VideoInfo> =>
-  fetchJson<VideoInfo>(
+export const getVideoData = async (videoId: string): Promise<VideoInfo> => {
+  assertIdentifier(videoId, "Video id");
+
+  return await fetchJson<VideoInfo>(
     `${KICK_API_BASE}/api/v1/video/${videoId}`,
     "video data",
     (value) => isRecord(value) && ("id" in value || "uuid" in value),
   );
+};
 
 export const getFollowersCount = async (channel: string): Promise<number> => {
+  assertIdentifier(channel, "Channel name");
+
   const data = await fetchJson<{ data: { count: number } }>(
     `${KICK_API_BASE}/api/v1/channels/${encodeURIComponent(channel)}/followers-count`,
     "followers count",
@@ -127,6 +148,8 @@ export const getFollowersCount = async (channel: string): Promise<number> => {
 };
 
 export const getChatroomRules = async (channel: string): Promise<string> => {
+  assertIdentifier(channel, "Channel name");
+
   const data = await fetchJson<{ data: { rules: string } }>(
     `${KICK_API_BASE}/api/v2/channels/${encodeURIComponent(channel)}/chatroom/rules`,
     "chatroom rules",
@@ -141,16 +164,22 @@ export const getChatroomRules = async (channel: string): Promise<string> => {
 
 export const getChannelLinks = async (
   channel: string,
-): Promise<ChannelLink[]> =>
-  fetchJsonArray<ChannelLink>(
+): Promise<ChannelLink[]> => {
+  assertIdentifier(channel, "Channel name");
+
+  return await fetchJsonArray<ChannelLink>(
     `${KICK_API_BASE}/api/v1/channels/${encodeURIComponent(channel)}/links`,
     "channel links",
   );
+};
 
 export const getChannelVideos = async (
   channel: string,
-): Promise<ChannelVideo[]> =>
-  fetchJsonArray<ChannelVideo>(
+): Promise<ChannelVideo[]> => {
+  assertIdentifier(channel, "Channel name");
+
+  return await fetchJsonArray<ChannelVideo>(
     `${KICK_API_BASE}/api/v2/channels/${encodeURIComponent(channel)}/videos`,
     "channel videos",
   );
+};

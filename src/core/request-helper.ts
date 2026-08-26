@@ -64,19 +64,52 @@ export const createRequestContext = (
   timeoutMs: timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS,
 });
 
+const MAX_BODY_SNIPPET_LENGTH = 200;
+
+/** Renders the response body as a short single-line snippet for error
+ * messages, or an empty string when there is nothing useful to show. */
+export const summarizeBody = (data: unknown): string => {
+  let text: string;
+  if (typeof data === "string") {
+    text = data;
+  } else if (data === null || data === undefined) {
+    return "";
+  } else {
+    try {
+      text = JSON.stringify(data);
+    } catch {
+      text = String(data);
+    }
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const snippet =
+    trimmed.length > MAX_BODY_SNIPPET_LENGTH
+      ? `${trimmed.slice(0, MAX_BODY_SNIPPET_LENGTH)}…`
+      : trimmed;
+  return ` — ${snippet}`;
+};
+
 export class HttpStatusError extends Error {
   readonly status: number;
+  readonly body?: unknown;
 
   constructor(
     status: number,
     statusText: string,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; body?: unknown },
   ) {
-    super(`Request failed with status: ${status} ${statusText}`.trimEnd(), {
-      cause: options?.cause,
-    });
+    super(
+      `Request failed with status: ${status} ${statusText}${summarizeBody(options?.body)}`.trimEnd(),
+      { cause: options?.cause },
+    );
     this.name = "HttpStatusError";
     this.status = status;
+    this.body = options?.body;
   }
 }
 
@@ -99,7 +132,9 @@ export const makeRequest = async <T>(
   });
 
   if (response.status < 200 || response.status >= 300) {
-    throw new HttpStatusError(response.status, response.statusText);
+    throw new HttpStatusError(response.status, response.statusText, {
+      body: response.data,
+    });
   }
 
   return response.data;

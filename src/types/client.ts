@@ -53,6 +53,8 @@ export interface KickClientUser {
 
 export interface ClientEvents {
   ready: (user: KickClientUser) => void;
+  /** Emitted on every successful connection after the first one. */
+  reconnected: (user: KickClientUser | null) => void;
   ChatMessage: (data: MessageData) => void;
   Subscription: (data: Subscription) => void;
   GiftedSubscriptions: (data: GiftedSubscriptionsEvent) => void;

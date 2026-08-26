@@ -39,6 +39,7 @@ export type {
 } from "./types/client";
 export type { ClipFeed } from "./types/clips";
 export type {
+  BaseChatMessage,
   ChatMessage,
   FollowersUpdatedEvent,
   GiftedSubscriptionsEvent,

@@ -105,6 +105,22 @@ describe("HttpStatusError / isAuthExpiredError", () => {
     expect(error.message).toBe("Request failed with status: 429");
     expect(error.name).toBe("HttpStatusError");
   });
+
+  it("appends a truncated body snippet and exposes the raw body", () => {
+    const message = "x".repeat(300);
+    const error = new HttpStatusError(403, "Forbidden", {
+      body: { message },
+    });
+    expect(error.body).toEqual({ message });
+    const snippet = JSON.stringify({ message: "x".repeat(200) }).slice(0, 200);
+    expect(error.message).toBe(
+      `Request failed with status: 403 Forbidden — ${snippet}…`,
+    );
+
+    const empty = new HttpStatusError(500, "", { body: "" });
+    expect(empty.message).toBe("Request failed with status: 500");
+    expect(empty.body).toBe("");
+  });
 });
 
 describe("makeRequest", () => {

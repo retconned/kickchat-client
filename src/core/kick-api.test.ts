@@ -32,6 +32,16 @@ describe("getChannelData", () => {
     axiosGet.mockResolvedValue({ status: 200, data: {} });
   });
 
+  it("validates the channel name before fetching", async () => {
+    await expect(getChannelData("../admin")).rejects.toThrow(
+      /may only contain letters, digits, hyphens and underscores/,
+    );
+    await expect(getVideoData("a/b")).rejects.toThrow(
+      /may only contain letters, digits, hyphens and underscores/,
+    );
+    expect(axiosGet).not.toHaveBeenCalled();
+  });
+
   it("fetches and returns valid channel data", async () => {
     const payload = { id: 1, slug: "xqc", chatroom: { id: 51082 } };
     axiosGet.mockResolvedValue({ status: 200, data: payload });

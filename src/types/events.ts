@@ -4,7 +4,8 @@ export interface MessageEvent {
   channel: string;
 }
 
-export interface MessageData {
+/** Fields shared by every chat-message-shaped payload. */
+export interface BaseChatMessage {
   id: string;
   chatroom_id: number;
   content: string;
@@ -16,6 +17,11 @@ export interface MessageData {
     slug: string;
     identity: { color: string; badges: unknown };
   };
+}
+
+export interface ChatMessage extends BaseChatMessage {}
+
+export interface MessageData extends ChatMessage {
   metadata?: {
     original_sender: { id: string; username: string };
     original_message: {
@@ -25,24 +31,7 @@ export interface MessageData {
   };
 }
 
-export interface SubscriptionData {
-  username: string;
-  months: number;
-}
-
-export interface ChatMessage {
-  id: string;
-  chatroom_id: number;
-  content: string;
-  type: string;
-  created_at: string;
-  sender: {
-    id: number;
-    username: string;
-    slug: string;
-    identity: { color: string; badges: unknown };
-  };
-}
+export type SubscriptionData = Omit<Subscription, "chatroom_id">;
 
 export interface Subscription {
   chatroom_id: number;

@@ -56,6 +56,9 @@ describe("createClient validation", () => {
   it("rejects empty and whitespace-only channel names", () => {
     expect(() => createClient("")).toThrow(/non-empty channel name/);
     expect(() => createClient("   ")).toThrow(/non-empty channel name/);
+    expect(() => createClient("bad/name")).toThrow(
+      /may only contain letters, digits and underscores/,
+    );
   });
 });
 
@@ -205,6 +208,47 @@ describe("authenticated actions", () => {
       /more than 0 minutes/,
     );
     expect(axiosCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects identifiers that would corrupt the request path", async () => {
+    const client = await loggedIn();
+
+    await expect(client.banUser("../admin")).rejects.toThrow(
+      /may only contain letters, digits and underscores/,
+    );
+    await expect(client.unbanUser("foo bar")).rejects.toThrow(
+      /may only contain letters, digits and underscores/,
+    );
+    await expect(client.deleteMessage("a?b")).rejects.toThrow(/messageId/);
+    await expect(client.getPoll("bad/channel")).rejects.toThrow(
+      /may only contain letters, digits and underscores/,
+    );
+    await expect(client.getLeaderboards("x#y")).rejects.toThrow(
+      /may only contain letters, digits and underscores/,
+    );
+    expect(axiosCall).not.toHaveBeenCalled();
+    client.destroy();
+  });
+
+  it("emits ready once and reconnected on subsequent connections", async () => {
+    const client = createClient("xqc");
+    const onReady = vi.fn();
+    const onReconnected = vi.fn();
+    client.on("ready", onReady);
+    client.on("reconnected", onReconnected);
+
+    await client.login(credentials);
+
+    // The socket created by this login; simulate two connections on it.
+    const [, options] = wsFactory.mock.lastCall ?? [];
+    options?.onOpen?.(); // first connection → ready
+    options?.onClose?.();
+    options?.onOpen?.(); // subsequent connection → reconnected
+
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(onReconnected).toHaveBeenCalledTimes(1);
+    expect(onReconnected).toHaveBeenCalledWith(expect.anything());
+    client.destroy();
   });
 
   it("unbans users and deletes messages via DELETE", async () => {

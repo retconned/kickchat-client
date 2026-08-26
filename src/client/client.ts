@@ -34,6 +34,27 @@ import {
 } from "../types/client";
 import { type ClipFeed } from "../types/clips";
 
+export const USERNAME_PATTERN = /^[A-Za-z0-9_]+$/;
+const MESSAGE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/** Kick usernames and channel slugs only ever contain letters, digits and
+ * underscores — anything else would corrupt the request path. */
+const assertUsername = (value: string, label: string): string => {
+  if (!USERNAME_PATTERN.test(value)) {
+    throw new Error(
+      `${label} may only contain letters, digits and underscores`,
+    );
+  }
+  return value;
+};
+
+const assertMessageId = (value: string): string => {
+  if (!MESSAGE_ID_PATTERN.test(value)) {
+    throw new Error("messageId may only contain letters, digits, - and _");
+  }
+  return value;
+};
+
 export const createClient = (
   channelName: string,
   options: ClientOptions = {},
@@ -41,6 +62,8 @@ export const createClient = (
   if (typeof channelName !== "string" || channelName.trim().length === 0) {
     throw new Error("createClient requires a non-empty channel name");
   }
+
+  assertUsername(channelName, "Channel name");
 
   const emitter = new EventEmitter();
 
@@ -60,10 +83,10 @@ export const createClient = (
 
   let channelInfo: KickChannelInfo | null = null;
   let wsHandle: { close: () => void } | null = null;
+  let hasEmittedReady = false;
 
   let session: KickSession | null = null;
   let destroyed = false;
-  let generation = 0;
 
   const defaultOptions: ClientOptions = {
     plainEmote: true,
@@ -111,6 +134,25 @@ export const createClient = (
       { session: requireSession(), channelSlug },
       mergedOptions.timeoutMs,
     );
+
+  const handleSocketMessage = (data: { toString(): string }) => {
+    const parsedMessage = parseMessage(data.toString());
+    if (!parsedMessage) {
+      return;
+    }
+
+    if (parsedMessage.type === "ChatMessage" && mergedOptions.plainEmote) {
+      if (typeof parsedMessage.data.content !== "string") {
+        throw new Error("Received a ChatMessage with non-string content");
+      }
+      parsedMessage.data.content = parsedMessage.data.content.replace(
+        /\[emote:(\d+):(\w+)\]/g,
+        (_, __, emoteName) => emoteName,
+      );
+    }
+
+    emitter.emit(parsedMessage.type, parsedMessage.data);
+  };
 
   interface AuthedCall {
     slug: string;
@@ -194,8 +236,6 @@ export const createClient = (
   };
 
   const initialize = async () => {
-    const gen = generation;
-
     try {
       if (mergedOptions.readOnly === false && !session) {
         throw new Error("Authentication required. Please login first.");
@@ -205,8 +245,7 @@ export const createClient = (
 
       const info = await getChannelData(channelName);
 
-      if (gen !== generation) {
-        log(`Initialization for: ${channelName} was superseded, aborting.`);
+      if (destroyed) {
         return;
       }
 
@@ -220,25 +259,19 @@ export const createClient = (
         channelId: channelInfo.id,
         onOpen: () => {
           log(`Connected to channel: ${channelName}`);
-          emitter.emit("ready", getUser());
+          if (hasEmittedReady) {
+            emitter.emit("reconnected", getUser());
+          } else {
+            hasEmittedReady = true;
+            emitter.emit("ready", getUser());
+          }
         },
         onMessage: (data) => {
-          const parsedMessage = parseMessage(data.toString());
-          if (!parsedMessage) {
-            return;
+          try {
+            handleSocketMessage(data);
+          } catch (error) {
+            emitError(error);
           }
-
-          if (
-            parsedMessage.type === "ChatMessage" &&
-            mergedOptions.plainEmote
-          ) {
-            parsedMessage.data.content = parsedMessage.data.content.replace(
-              /\[emote:(\d+):(\w+)\]/g,
-              (_, __, emoteName) => emoteName,
-            );
-          }
-
-          emitter.emit(parsedMessage.type, parsedMessage.data);
         },
         onClose: () => {
           log(`Disconnected from channel: ${channelName}`);
@@ -357,6 +390,8 @@ export const createClient = (
       throw new Error("Specify a user to ban");
     }
 
+    assertUsername(targetUser, "Target username");
+
     if (!permanent) {
       if (!durationInMinutes) {
         throw new Error("Specify a duration in minutes");
@@ -397,6 +432,8 @@ export const createClient = (
       throw new Error("Specify a user to unban");
     }
 
+    assertUsername(targetUser, "Target username");
+
     await performAuthedAction<{ success: boolean }>(
       {
         slug: info.slug,
@@ -417,6 +454,8 @@ export const createClient = (
     if (!messageId) {
       throw new Error("Specify a messageId to delete");
     }
+
+    assertMessageId(messageId);
 
     await performAuthedAction<{ success: boolean }>(
       {
@@ -462,15 +501,16 @@ export const createClient = (
     );
   };
 
-  const getPoll = (targetChannel?: string): Promise<Poll> => {
+  const getPoll = async (targetChannel?: string): Promise<Poll> => {
     const channel = targetChannel || channelName;
 
     if (!targetChannel) {
       requireChannel();
     }
     requireSession();
+    assertUsername(channel, "Channel name");
 
-    return performAuthedAction<Poll>(
+    return await performAuthedAction<Poll>(
       {
         slug: channel,
         verb: "get",
@@ -484,15 +524,18 @@ export const createClient = (
     );
   };
 
-  const getLeaderboards = (targetChannel?: string): Promise<Leaderboard> => {
+  const getLeaderboards = async (
+    targetChannel?: string,
+  ): Promise<Leaderboard> => {
     const channel = targetChannel || channelName;
 
     if (!targetChannel) {
       requireChannel();
     }
     requireSession();
+    assertUsername(channel, "Channel name");
 
-    return performAuthedAction<Leaderboard>(
+    return await performAuthedAction<Leaderboard>(
       {
         slug: channel,
         verb: "get",
@@ -546,7 +589,6 @@ export const createClient = (
 
   const destroy = () => {
     destroyed = true;
-    generation += 1;
     wsHandle?.close();
     wsHandle = null;
     emitter.removeAllListeners();
